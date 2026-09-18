@@ -1,0 +1,10 @@
+{
+  "name": "Ads1232",
+  "version": "0.1.0",
+  "description": "Driver bit-bang ADS1232 (TI SBAS350H) untuk load cell Heat Box: DRDY non-blocking, offset self-calibration, filter median+moving average, kalibrasi di NVS",
+  "keywords": ["ads1232", "load cell", "adc", "heatbox"],
+  "license": "MIT",
+  "authors": [{ "name": "Heatbox Project" }],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}

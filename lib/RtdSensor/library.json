@@ -1,0 +1,10 @@
+{
+  "name": "RtdSensor",
+  "version": "0.1.0",
+  "description": "Wrapper MAX31865 (PT100) non-blocking untuk Heat Box: continuous conversion, decode fault register, auto clear fault",
+  "keywords": ["max31865", "pt100", "rtd", "heatbox"],
+  "license": "MIT",
+  "authors": [{ "name": "Heatbox Project" }],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}

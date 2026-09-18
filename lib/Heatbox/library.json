@@ -1,0 +1,12 @@
+{
+  "name": "Heatbox",
+  "version": "1.0.0",
+  "description": "Heatbox drying and weighing control library",
+  "keywords": ["heatbox", "weight", "drying", "ads1232"],
+  "license": "MIT",
+  "authors": [{
+    "name": "Heatbox Project"
+  }],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}

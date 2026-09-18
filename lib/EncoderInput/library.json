@@ -1,0 +1,10 @@
+{
+  "name": "EncoderInput",
+  "version": "0.1.0",
+  "description": "Rotary encoder EC11 polling (tanpa interrupt): quadrature state table 4x, debounce tombol, short/long press",
+  "keywords": ["encoder", "ec11", "polling", "heatbox"],
+  "license": "MIT",
+  "authors": [{ "name": "Heatbox Project" }],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}
