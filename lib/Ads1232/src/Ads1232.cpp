@@ -357,6 +357,22 @@ void Ads1232::processSample(int32_t value) {
     avgIdx_ = static_cast<uint8_t>((avgIdx_ + 1) % kAverageSize);
     filtered_ = static_cast<double>(avgSum_) / avgCount_;
 
+    // Rentang pergerakan keluaran: dasar deteksi stabil
+    stableRing_[stableIdx_] = filtered_;
+    stableIdx_ = static_cast<uint8_t>((stableIdx_ + 1) % kStableWindow);
+    if (stableCount_ < kStableWindow) {
+        ++stableCount_;
+        stableSpan_ = NAN;
+    } else {
+        double lowest = stableRing_[0];
+        double highest = stableRing_[0];
+        for (uint8_t i = 1; i < kStableWindow; ++i) {
+            if (stableRing_[i] < lowest) lowest = stableRing_[i];
+            if (stableRing_[i] > highest) highest = stableRing_[i];
+        }
+        stableSpan_ = static_cast<float>(highest - lowest);
+    }
+
     if (avgCount_ == kAverageSize) {
         // standar deviasi sampel (n-1) dari isi window moving average
         double sumSq = 0.0;
@@ -415,6 +431,9 @@ void Ads1232::resetFilters() {
     rawCount_ = 0;
     rawStdDev_ = NAN;
     rawPeakToPeak_ = 0;
+    stableIdx_ = 0;
+    stableCount_ = 0;
+    stableSpan_ = NAN;
     clipped_ = false;
     newSample_ = false;
 }
@@ -653,14 +672,16 @@ float Ads1232::grams() const {
 // jatuh kembali ke count selama belum ada kalibrasi.
 float Ads1232::stableThresholdCounts() const {
     if (!hasScale_) {
-        return kStableStdDevCounts;
+        return kStableSpanCounts;
     }
-    return kStableStdDevMg * std::fabs(countsPerGram_) / 1000.0f;
+    return kStableSpanMg * std::fabs(countsPerGram_) / 1000.0f;
 }
 
+// Stabil = angka yang tampil tidak bergerak lebih dari ambang selama
+// kStableWindow sampel terakhir.
 bool Ads1232::isStable() const {
-    return state_ == State::Running && avgCount_ == kAverageSize &&
-           stdDev_ < stableThresholdCounts();
+    return state_ == State::Running && stableCount_ == kStableWindow &&
+           !std::isnan(stableSpan_) && stableSpan_ < stableThresholdCounts();
 }
 
 Ads1232::Health Ads1232::health() const { return health_; }
@@ -689,6 +710,7 @@ int32_t Ads1232::offset() const { return static_cast<int32_t>(std::lround(offset
 double Ads1232::offsetCounts() const { return offsetCounts_; }
 float Ads1232::filteredCounts() const { return static_cast<float>(filtered_); }
 float Ads1232::stdDevCounts() const { return stdDev_; }
+float Ads1232::stableSpanCounts() const { return stableSpan_; }
 float Ads1232::rawStdDevCounts() const { return rawStdDev_; }
 int32_t Ads1232::rawPeakToPeakCounts() const { return rawPeakToPeak_; }
 uint32_t Ads1232::spikesRejected() const { return spikesRejected_; }

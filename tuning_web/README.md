@@ -51,9 +51,9 @@ seluruh fit, residual, histeresis, dan repeatability dihitung di PC oleh `analys
 Data mentah karena itu tetap berguna kalau rumus konversinya diganti kemudian.
 
 Kolom **± (mg)** dan **rasio S/N** di tabel menunjukkan apakah sebuah titik bermakna.
-Anak timbangan dengan S/N di bawah 10 ditandai merah: pada load cell 300 g ini
-ketidakpastian satu titik sekitar 0,5 mg, sehingga beban di bawah ~50 mg hasilnya
-didominasi noise, bukan massa.
+Pada hardware ini ketidakpastian satu titik adalah ±0,475 mg (SD raw 20,9 count dibagi
+akar 64 sampel, pada 5499 count/g), sehingga S/N = 10 tercapai di 4,75 mg. Titik dengan
+S/N di bawah 10 ditandai merah.
 
 Tombol **Terapkan ke firmware** mengirim `s <countsPerGram>` hasil fit dan menyimpannya
 ke NVS. Tiap sesi server menulis `data/calibration_<tanggal>_<jam>.csv` sendiri.

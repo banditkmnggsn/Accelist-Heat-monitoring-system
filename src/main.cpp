@@ -93,9 +93,12 @@ void printBanner() {
     Serial.printf(" RTD     : PT%.0f %s, RNOMINAL=%.1f ohm, RREF=%.1f ohm, filter 50 Hz, %" PRIu32 " ms/sampel\n",
                   RTD_RNOMINAL, wireModeText(), RTD_RNOMINAL, RTD_RREF, RtdSensor::kSamplePeriodMs);
     Serial.println(" ADS1232 : asumsi jumper GAIN=128, SPEED=10 SPS, A0=GND (AIN1)");
-    Serial.printf("           gerbang spike %.0f sigma (median-%u) -> moving average %u, stabil jika SD < %.1f mg\n",
+    Serial.printf("           gerbang spike %.0f sigma (median-%u) -> moving average %u\n",
                   Ads1232::kSpikeGateSigma, static_cast<unsigned>(Ads1232::kMedianSize),
-                  static_cast<unsigned>(Ads1232::kAverageSize), Ads1232::kStableStdDevMg);
+                  static_cast<unsigned>(Ads1232::kAverageSize));
+    Serial.printf("           STABLE jika angka bergerak < %.1f mg selama %u sampel (%.1f s)\n",
+                  Ads1232::kStableSpanMg, static_cast<unsigned>(Ads1232::kStableWindow),
+                  samplesToSeconds(Ads1232::kStableWindow));
     Serial.println("==============================================================");
 }
 
@@ -139,8 +142,20 @@ void printAdsDiagnostics() {
                 loadCell.lastSelfCalMs(), Ads1232::kSelfCalNominalMs);
     }
     logLine("  protocol error total      = %" PRIu32, loadCell.protocolErrorCount());
-    logLine("  SD window moving average  = %.2f count (ambang stabil %.2f) <- SETELAH filter",
-            loadCell.stdDevCounts(), loadCell.stableThresholdCounts());
+    const float span = loadCell.stableSpanCounts();
+    const float threshold = loadCell.stableThresholdCounts();
+    if (loadCell.isCalibrated()) {
+        const float mgPerCount = 1000.0f / std::fabs(loadCell.countsPerGram());
+        logLine("  gerak angka (%u sampel)    = %.2f count = %.3f mg (ambang %.3f mg) -> %s",
+                static_cast<unsigned>(Ads1232::kStableWindow), span, span * mgPerCount,
+                threshold * mgPerCount, loadCell.isStable() ? "STABLE" : "MOVING");
+    } else {
+        logLine("  gerak angka (%u sampel)    = %.2f count (ambang %.2f count) -> %s",
+                static_cast<unsigned>(Ads1232::kStableWindow), span, threshold,
+                loadCell.isStable() ? "STABLE" : "MOVING");
+    }
+    logLine("  SD window moving average  = %.2f count  (info saja, bukan dasar STABLE)",
+            loadCell.stdDevCounts());
 
     const float rawSd = loadCell.rawStdDevCounts();
     const int32_t rawPp = loadCell.rawPeakToPeakCounts();

@@ -142,13 +142,21 @@ A0=GND (AIN1).
   setelah self-calibration tidak dibuang (7.4.1).
 - **Deteksi fault protokol**: setelah pulsa ke-25, DOUT *wajib* HIGH. Kalau masih LOW,
   kemungkinan SCLK tidak diterima chip (wiring atau level logic) → status `DOUTERR`.
-- **Filter**: median-of-5 → moving average 16. `isStable()` bernilai true jika SD
-  16 sampel terakhir < `kStableStdDevCounts` (default 3 count).
-- **Tare / kalibrasi** berjalan di background: mengumpulkan 32 sampel (≈3,2 s), lalu
+- **Filter**: gerbang spike 6σ (median-of-5 sebagai pengganti sampel pencilan) →
+  moving average 16. Median **tidak** dipakai sebagai filter permanen karena median
+  sliding membuat keluaran berkorelasi sehingga rata-rata 16 sampel tidak memberi
+  pengurangan noise √16.
+- **Deteksi stabil**: `isStable()` true jika **rentang pergerakan angka yang tampil**
+  (maks−min keluaran moving average) selama `kStableWindow` = 32 sampel (3,2 s) di bawah
+  `kStableSpanMg` = 5 mg. Sebaran satu sampel mentah sengaja tidak dipakai: besarnya
+  tetap ~21 count baik saat diam maupun bergerak, jadi tidak bisa membedakan keduanya.
+- **Tare / kalibrasi** berjalan di background: mengumpulkan 64 sampel raw (≈6,4 s), lalu
   hasilnya dilaporkan lewat `takeEvent()`.
-- **NVS** (Preferences, namespace `heatbox`, key `ads_offset` dan `ads_cpg`) otomatis
-  di-load di `begin()`. Jika scale belum pernah dikalibrasi → status **UNCALIBRATED**,
-  dan scale default diperkirakan dari asumsi load cell 1 mV/V.
+- **NVS** (Preferences, namespace `heatbox`, key `ads_offset_d` dan `ads_cpg`) otomatis
+  di-load di `begin()`. Offset disimpan `double` (1 count ≈ 0,18 mg, pembulatan merugikan).
+  Jika scale belum pernah dikalibrasi → status **UNCALIBRATED**, dan scale default
+  diperkirakan dari asumsi load cell 1 mV/V — pada hardware ini sensitivitas
+  sebenarnya 0,7682 mV/V, sehingga default meleset 23 %.
 - **Diagnostik**: waktu DRDY pertama setelah PDWN (≈402 ms @10 SPS, sekaligus cek jumper
   SPEED), interval DRDY, durasi self-cal (≈801 ms), durasi shift-out, dan jumlah protocol error.
 
@@ -220,7 +228,7 @@ Wrapper `Adafruit_MAX31865` dengan konfigurasi `RREF`/`RNOMINAL`/wire-mode dari 
 
 | Status berat | Arti |
 |---|---|
-| `STABLE` | SD 16 sampel < ambang |
+| `STABLE` | angka yang tampil bergerak < 5 mg selama 32 sampel (3,2 s) |
 | `MOVING` | belum stabil |
 | `SETTLE` | setelah reset/self-cal, atau menunggu data pertama |
 | `BUSY` | tare/kalibrasi sedang mengumpulkan sampel |

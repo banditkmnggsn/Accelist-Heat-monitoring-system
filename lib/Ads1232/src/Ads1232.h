@@ -102,13 +102,16 @@ public:
     static constexpr uint8_t kRawRingSize = 64;  // dasar noise raw & gerbang spike
     static constexpr float kSpikeGateSigma = 6.0f;
 
-    // Ambang isStable(). Ini sebaran SATU sampel di dalam window, bukan
-    // ketidakpastian rata-ratanya: rata-rata 16 sampel independen ~4x lebih
-    // baik dari angka ini. Diukur di hardware 2025-09: SD raw 20.9 count
-    // (3.8 mg pada 5499 count/g), jadi ambang lama 3.0 count mustahil
-    // tercapai dan status STABLE tidak pernah muncul.
-    static constexpr float kStableStdDevMg = 6.0f;
-    static constexpr float kStableStdDevCounts = 35.0f;  // dipakai saat belum terkalibrasi
+    // Deteksi stabil mengukur PERGERAKAN ANGKA YANG TAMPIL, yaitu rentang
+    // (maks-min) keluaran moving average selama kStableWindow sampel.
+    //
+    // Sebaran satu sampel mentah TIDAK dipakai: besarnya tetap ~21 count
+    // entah timbangan diam atau bergerak, sehingga tidak pernah bisa
+    // membedakan keduanya. Yang berubah saat beban bergerak adalah keluaran
+    // rata-ratanya, dan itu yang diukur di sini.
+    static constexpr uint8_t kStableWindow = 32;      // 3.2 s @10 SPS
+    static constexpr float kStableSpanMg = 5.0f;
+    static constexpr float kStableSpanCounts = 30.0f;  // dipakai saat belum terkalibrasi
 
     // -----------------------------------------------------------------
     //  Tare & kalibrasi
@@ -178,6 +181,8 @@ public:
     // Noise SETELAH filter. Dipakai isStable(); JANGAN dipakai untuk laporan
     // spesifikasi — untuk itu pakai rawStdDevCounts().
     float stdDevCounts() const;    // NAN sampai window moving average penuh
+    // Rentang pergerakan angka yang tampil; inilah yang dipakai isStable().
+    float stableSpanCounts() const;     // NAN sampai window stabil penuh
     float rawStdDevCounts() const;      // noise sebenarnya, sebelum filter
     int32_t rawPeakToPeakCounts() const;
     uint32_t spikesRejected() const;
@@ -252,6 +257,10 @@ private:
     float rawStdDev_ = NAN;
     int32_t rawPeakToPeak_ = 0;
     uint32_t spikesRejected_ = 0;
+    double stableRing_[kStableWindow] = {};
+    uint8_t stableIdx_ = 0;
+    uint8_t stableCount_ = 0;
+    float stableSpan_ = NAN;
 
     // kalibrasi
     double offsetCounts_ = static_cast<double>(kDefaultOffset);

@@ -255,11 +255,11 @@
     };
 
     // ---------------- Kalibrasi multi-titik ----------------
-    // Ketidakpastian satu titik pada hardware ini ~0.5 mg (SD raw 20.9 count,
-    // 64 sampel, 5499 count/g). Beban di bawah WEAK_MG karena itu ditandai:
-    // angkanya akan didominasi noise, bukan massa.
-    const PRESETS_MG = [10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10];
-    const WEAK_MG = 50;
+    // Ketidakpastian satu titik pada hardware ini +/-0.475 mg (SD raw 20.9 count
+    // / sqrt(64), pada 5499 count/g). Rasio sinyal/noise 10 tercapai di 4.75 mg,
+    // jadi beban di bawah WEAK_MG ditandai: angkanya didominasi noise, bukan massa.
+    const PRESETS_MG = [10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
+    const WEAK_MG = 5;
     let pickedMg = null;
     let busyUntil = 0;
 
@@ -269,7 +269,7 @@
       const button = document.createElement('button');
       button.textContent = formatMg(mg);
       button.className = mg < WEAK_MG ? 'weak' : '';
-      if (mg < WEAK_MG) button.title = 'Di bawah ~50 mg hasilnya didominasi noise pada load cell 300 g ini';
+      if (mg < WEAK_MG) button.title = 'Di bawah ~5 mg rasio sinyal/noise < 10 pada load cell 300 g ini';
       button.onclick = () => pickWeight(mg, button);
       el('weights').appendChild(button);
     });
