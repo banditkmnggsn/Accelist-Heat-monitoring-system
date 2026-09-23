@@ -252,8 +252,11 @@ millis,tempC,rtdOhm,rtdFault,rawCounts,grams,stable,encPos
 
 | Cmd | Fungsi |
 |---|---|
-| `t` | tare (32 sampel) |
-| `c <gram>` | kalibrasi dengan anak timbangan, contoh `c 200` |
+| `t` | tare (64 sampel, ≈6,4 s) |
+| `c <gram>` | kalibrasi 1 titik dengan anak timbangan, contoh `c 10` |
+| `n` | rekam titik nol → baris `CALZERO` |
+| `m <mg> <u\|d>` | rekam titik kalibrasi → baris `CALPT`; `u` naik, `d` turun |
+| `s <cpg>` | terapkan countsPerGram hasil fit dari PC |
 | `z` | offset self-calibration ADS1232 |
 | `r` | reset ADS1232 (PDWN cycle) |
 | `v` | ganti mode human ↔ CSV |
@@ -261,15 +264,53 @@ millis,tempC,rtdOhm,rtdFault,rawCounts,grams,stable,encPos
 | `p` | cetak kalibrasi tersimpan + diagnostik ADS1232 |
 | `?` | bantuan |
 
+## Empat hal berbeda yang sering tertukar
+
+Hanya dua di antaranya yang benar-benar "kalibrasi".
+
+| Perintah | Tingkat | Yang diperbaiki | Perlu anak timbangan? |
+|---|---|---|---|
+| `r` | cip | **Bukan kalibrasi.** Reset perangkat keras ADS1232 lewat siklus PDWN, lalu buang 4 konversi. Dipakai kalau cip macet atau muncul `DOUTERR`. | tidak |
+| `z` | cip | Offset internal ADC + PGA. Cip mengukur offset-nya sendiri lalu menguranginya (≈801 ms). Cip **tidak tahu apa-apa** soal load cell Anda. | tidak |
+| `t` | aplikasi | Titik **nol**: raw saat ini dicatat sebagai acuan kosong. Memperhitungkan berat wadah dan sisa offset. | tidak |
+| `c` / `m`+`s` | aplikasi | **Skala**: berapa count per gram. Inilah yang memperbaiki "10 g terbaca 8 g". | ya |
+
+Ketergantungannya berurutan, dan inilah sebabnya urutan tidak boleh dibalik:
+
+```
+z  mengubah raw       ->  maka t harus diulang
+t  menentukan offset  ->  maka skala harus dihitung SETELAH t
+r  mereset cip        ->  maka z dan t diulang (lihat catatan)
+```
+
+Catatan: datasheet SBAS350H tidak menyatakan apakah PDWN menghapus hasil *offset
+self-calibration*, sehingga mengulang `z` setelah `r` adalah sikap konservatif, bukan
+keharusan yang terbukti. Lihat tabel TODO VERIFY di bawah.
+
 ### Urutan kalibrasi load cell
 
+**Cepat — satu titik** (cukup untuk pemakaian biasa):
+
 1. Nyalakan board, tunggu pesan `ADS1232 settling selesai`.
-2. `z`: tunggu `Self-calibration selesai` (≈801 ms).
-3. Kosongkan timbangan, tunggu `STABLE`, lalu `t` (≈3,2 s).
+2. `z`, tunggu `Self-calibration selesai` (≈801 ms).
+3. Kosongkan timbangan, tunggu `STABLE`, lalu `t` (≈6,4 s).
 4. Pasang anak timbangan, tunggu `STABLE`, lalu `c <gram>`.
 5. `p` untuk memeriksa nilai yang tersimpan.
 
-Setelah `z` atau `r`, **ulangi tare**, karena offset internal ADC berubah.
+Kerjakan langkah 3 dan 4 **berdekatan**. Drift nol 14,2 mg/menit berarti jeda satu
+menit antara tare dan kalibrasi sudah menyuntikkan kesalahan ~0,14 % pada beban 10 g.
+
+**Teliti — multi-titik** (untuk angka linearitas dan histeresis di laporan):
+
+Jalankan dari panel *Kalibrasi multi-titik* di `tuning_web`, yang mengirim `n` dan
+`m` untuk Anda dan menghitung fit-nya. Langkah `z` dan `t` tetap dilakukan lebih
+dulu. Prosedur lengkap dan alasan tiap langkah ada di
+[tuning_web/README.md](tuning_web/README.md) dan
+[SPESIFIKASI-TEKNIS.md](SPESIFIKASI-TEKNIS.md) §7.
+
+Bedanya dengan `c`: multi-titik mengoreksi drift memakai nol sebelum **dan** sesudah
+tiap beban, memakai banyak titik sehingga linearitas terukur, dan menghasilkan
+residual, histeresis, serta repeatability. `c` hanya memberi satu angka skala.
 
 ---
 
@@ -286,10 +327,9 @@ Setelah `z` atau `r`, **ulangi tare**, karena offset internal ADC berubah.
    (rasiometrik).
 6. **Protokol 26 pulsa**: durasi `z` sekitar 801 ms. Kalau hanya ≈100 ms, kalibrasi tidak terpicu.
 7. **Durasi shift-out** (`p`) di bawah 1000 µs.
-8. **Ambang stabil**: noise ADS1232 @gain 128, 10 SPS = 17 nV RMS (Tabel 6-1), ≈7 count
-   RMS pada VREF 5 V dan lebih besar pada VREF 3,3 V. Ambang default 3 count
-   **kemungkinan terlalu ketat**. Ukur SD dengan `p` saat timbangan kosong, lalu set
-   `kStableStdDevCounts` sekitar 2–3× nilai itu.
+8. **Ambang stabil**: sudah diukur di hardware ini — noise raw 20,9 count RMS (48,7 nV),
+   dan angka yang tampil bergerak ~2,6 mg saat benar-benar diam. `kStableSpanMg` = 5 mg
+   karena itu tercapai dengan margin. Ukur ulang dengan `p` kalau pengawatan berubah.
 9. **Encoder**: arah putar (tukar A/B kalau terbalik), posisi diam = A=B=1, dan
    4 transisi per detent.
 10. **Pull-up**: pull-up internal ESP32 ≈ 45 kΩ; tambahkan 10 kΩ eksternal kalau encoder
