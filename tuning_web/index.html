@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Heat Box Tuning</title>
+  <style>
+    :root { color-scheme: dark; --bg: #111820; --panel: #1a2530; --line: #30404e; --text: #e9f0f4; --muted: #9eb0bb; --accent: #f0b35b; --ok: #63d09b; --bad: #ef7777; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(circle at 85% 0%, #263b45 0, var(--bg) 38%); color: var(--text); font: 16px/1.4 Georgia, serif; }
+    main { width: min(1280px, 100%); margin: 0 auto; padding: 32px 20px 48px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 20px; }
+    h1 { margin: 0; font-size: clamp(2rem, 6vw, 4rem); font-weight: 400; letter-spacing: 0; }
+    .eyebrow { color: var(--accent); font: 700 12px/1.2 ui-monospace, monospace; letter-spacing: 0; text-transform: uppercase; }
+    .connection { color: var(--muted); text-align: right; font: 13px ui-monospace, monospace; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); margin-right: 6px; }
+    .dot.ok { background: var(--ok); }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
+    .metric, .panel { background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); }
+    .metric { min-height: 132px; padding: 18px; }
+    .metric label { display: block; color: var(--muted); font: 12px ui-monospace, monospace; text-transform: uppercase; }
+    .value { display: block; margin-top: 16px; color: var(--accent); font-size: clamp(1.7rem, 4vw, 2.6rem); }
+    .unit { color: var(--muted); font-size: 14px; }
+    .layout { display: grid; grid-template-columns: 330px 1fr; gap: 12px; align-items: start; }
+    .panel { padding: 18px; }
+    h2 { margin: 0 0 14px; font-size: 1.2rem; font-weight: 400; }
+    .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    button { min-height: 42px; border: 1px solid #6d5938; background: #2d291f; color: var(--text); cursor: pointer; font: 14px ui-monospace, monospace; }
+    button:hover { background: #4a3b24; }
+    .logbar { display: flex; gap: 8px; align-items: stretch; margin-bottom: 10px; flex-wrap: wrap; }
+    .logbar button { min-height: 34px; padding: 0 14px; }
+    .logbar button.frozen { border-color: var(--bad); background: #3a2224; color: #ffd2d2; }
+    input[type=search] { flex: 1 1 180px; min-width: 140px; background: #131c24; border: 1px solid var(--line); color: var(--text); padding: 0 10px; font: 13px ui-monospace, monospace; }
+    input[type=search]:focus { outline: 1px solid var(--accent); }
+    pre { height: 520px; overflow: auto; margin: 0; color: #b9c8cf; white-space: pre; font: 12px/1.5 ui-monospace, monospace; }
+    pre.frozen { border-left: 3px solid var(--bad); padding-left: 9px; }
+    .status { color: var(--muted); font: 13px ui-monospace, monospace; }
+    .logmeta { margin: 8px 0 0; }
+    .held { color: var(--accent); }
+    .calpanel { margin-top: 12px; }
+    .steps { margin: 0; padding-left: 22px; }
+    .steps li { margin-bottom: 14px; }
+    .steps button { min-height: 34px; padding: 0 14px; vertical-align: middle; }
+    .steps .status { display: block; margin-top: 4px; }
+    .weights { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .weights button { min-height: 34px; padding: 0 12px; }
+    .weights button.picked { border-color: var(--accent); background: #5a4527; color: #fff; }
+    .weights button.weak { opacity: 0.55; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; font: 12px ui-monospace, monospace; }
+    th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: right; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 400; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    td.warn { color: var(--bad); }
+    .kv { color: var(--accent); }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    @media (max-width: 700px) { header { align-items: start; flex-direction: column; } .connection { text-align: left; } .grid { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><div class="eyebrow">Temporary instrument panel</div><h1>Heat Box<br>tuning</h1></div>
+      <div class="connection"><span id="dot" class="dot"></span><span id="connection">menunggu serial</span><br><span id="port">-- @ 115200</span></div>
+    </header>
+    <section class="grid">
+      <div class="metric"><label>Suhu PT100</label><span id="temp" class="value">--</span><span class="unit">&deg;C</span></div>
+      <div class="metric"><label>Resistansi RTD</label><span id="ohm" class="value">--</span><span class="unit">ohm</span></div>
+      <div class="metric"><label>Berat</label><span id="grams" class="value">--</span><span class="unit">gram</span></div>
+      <div class="metric"><label>Status ADS1232</label><span id="status" class="value">--</span><span class="unit">raw <span id="raw">--</span></span></div>
+    </section>
+    <section class="layout">
+      <div class="panel">
+        <h2>Kontrol tuning</h2>
+        <div class="actions">
+          <button data-command="t">Tare</button><button data-command="z">Self-cal</button>
+          <button data-command="r">Reset ADS</button><button data-command="p">Diagnostik</button>
+          <button data-command="?">Bantuan</button><button data-command="e">Reset encoder</button>
+        </div>
+        <div class="logbar" style="margin-top:10px">
+          <input id="calGrams" type="search" placeholder="gram anak timbangan" value="10">
+          <button id="calBtn">Kalibrasi</button>
+        </div>
+        <p class="status" id="details">Belum ada report sensor.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Serial terakhir</h2></div>
+        <div class="logbar">
+          <button id="freeze">Bekukan</button>
+          <button id="clear">Bersihkan</button>
+          <button id="download">Unduh</button>
+          <input id="filter" type="search" placeholder="filter teks, mis. CALPT atau raw 1127">
+        </div>
+        <pre id="log">Menunggu data...</pre>
+        <p class="status logmeta" id="logmeta">0 baris</p>
+      </div>
+    </section>
+
+    <section class="panel calpanel">
+      <div class="panel-head">
+        <h2>Kalibrasi multi-titik</h2>
+        <span class="status" id="calState">nol belum direkam</span>
+      </div>
+
+      <ol class="steps">
+        <li>
+          <b>Kosongkan timbangan</b>, lalu <button id="calZero">Rekam NOL</button>
+          <span class="status">tiap titik dikoreksi dengan nol sebelum &amp; sesudahnya, itu yang membatalkan drift</span>
+        </li>
+        <li>
+          <b>Pilih beban</b> yang akan diletakkan:
+          <div class="weights" id="weights"></div>
+          <div class="logbar" style="margin-top:8px">
+            <input id="calManual" type="search" placeholder="atau ketik sendiri, dalam mg">
+            <label class="status"><input type="radio" name="dir" value="U" checked> naik</label>
+            <label class="status"><input type="radio" name="dir" value="D"> turun</label>
+          </div>
+        </li>
+        <li>
+          <b>Letakkan bebannya</b>, tunggu diam, lalu
+          <button id="calPoint" disabled>Beban sudah diletakkan</button>
+          <span class="status">merekam 64 sampel (~6,4 detik)</span>
+        </li>
+        <li><b>Angkat beban</b> dan tekan <b>Rekam NOL</b> lagi, lalu ulangi untuk beban berikutnya.</li>
+      </ol>
+
+      <div class="logbar" style="margin-top:14px">
+        <button id="calApply" disabled>Terapkan ke firmware</button>
+        <button id="calCsv">Unduh CSV</button>
+        <button id="calClear">Hapus semua titik</button>
+      </div>
+
+      <div id="calFit" class="status" style="margin-top:14px">Belum ada titik.</div>
+      <div style="overflow:auto"><table id="calTable"></table></div>
+      <details id="calReportBox" style="margin-top:14px" hidden>
+        <summary class="status" style="cursor:pointer">Ringkasan siap tempel ke laporan</summary>
+        <pre id="calReport" style="height:auto;max-height:320px;margin-top:8px"></pre>
+      </details>
+    </section>
+  </main>
+  <script>
+    const el = id => document.getElementById(id);
+    const MAX_CLIENT_LINES = 20000;
+
+    let nextSeq = 0;          // nomor urut baris berikutnya yang belum diambil dari server
+    let firstSeq = 0;         // nomor urut absolut buffer[0]
+    let buffer = [];          // seluruh baris yang sudah diterima
+    let frozen = false;
+    let frozenLen = 0;        // panjang buffer saat dibekukan; baris setelah ini tidak ditampilkan
+    let dirty = true;         // perlu render ulang
+
+    function visibleLines() {
+      const needle = el('filter').value.trim().toLowerCase();
+      const limit = frozen ? frozenLen : buffer.length;
+      const out = [];
+      for (let i = 0; i < limit; i++) {
+        const text = buffer[i];
+        if (needle && !text.toLowerCase().includes(needle)) continue;
+        out.push(String(firstSeq + i + 1).padStart(6, ' ') + ' | ' + text);
+      }
+      return out;
+    }
+
+    let shownKey = null;      // penanda isi <pre> saat ini, supaya tidak dibangun ulang percuma
+    let shownCount = 0;
+
+    function render() {
+      if (!dirty) return;
+      dirty = false;
+      const pre = el('log');
+      const key = `${frozen ? frozenLen : buffer.length}|${firstSeq}|${el('filter').value}`;
+      if (key !== shownKey) {
+        // textContent mereset scrollTop, jadi posisi scroll disimpan dan dipasang ulang
+        const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+        const previousTop = pre.scrollTop;
+        const lines = visibleLines();
+        shownCount = lines.length;
+        shownKey = key;
+        pre.textContent = lines.length ? lines.join('\n') : '(tidak ada baris yang cocok)';
+        pre.scrollTop = (!frozen && atBottom) ? pre.scrollHeight : previousTop;
+      }
+      pre.classList.toggle('frozen', frozen);
+      el('logmeta').innerHTML = `${shownCount} baris tampil / ${buffer.length} tersimpan` +
+        (frozen ? ` &nbsp;<span class="held">BEKU &mdash; ${buffer.length - frozenLen} baris baru tertahan</span>` : '');
+    }
+
+    async function refresh() {
+      try {
+        const state = await fetch(`/api/state?since=${nextSeq}`, { cache: 'no-store' }).then(r => r.json());
+        el('dot').classList.toggle('ok', state.connected);
+        el('connection').textContent = state.connected ? 'serial terhubung' : 'serial terputus';
+        el('port').textContent = `${state.port} @ ${state.baud}`;
+        const d = state.data;
+        if (d) {
+          el('temp').textContent = d.tempC.toFixed(2);
+          el('ohm').textContent = d.rtdOhm.toFixed(2);
+          el('grams').textContent = d.grams === null ? '--' : d.grams.toFixed(3);
+          el('status').textContent = d.status;
+          el('raw').textContent = d.rawCounts;
+          el('details').textContent = `RTD fault 0x${d.rtdFault.toString(16).padStart(2, '0').toUpperCase()} | encoder ${d.encoder} | tombol ${d.button} | uptime ${d.seconds.toFixed(1)} s`;
+        }
+        if (state.log.length) {
+          if (!buffer.length) firstSeq = state.logFirstSeq;
+          buffer.push(...state.log);
+          if (buffer.length > MAX_CLIENT_LINES) {
+            const drop = buffer.length - MAX_CLIENT_LINES;
+            buffer.splice(0, drop);
+            firstSeq += drop;
+          }
+          dirty = true;  // saat beku, render() hanya memperbarui penghitung "tertahan"
+        }
+        nextSeq = state.logNextSeq;
+        render();
+      } catch (error) { el('connection').textContent = 'web tidak merespons'; }
+    }
+
+    el('freeze').onclick = () => {
+      frozen = !frozen;
+      frozenLen = buffer.length;
+      el('freeze').textContent = frozen ? 'Lanjutkan' : 'Bekukan';
+      el('freeze').classList.toggle('frozen', frozen);
+      dirty = true;
+      render();
+    };
+    el('clear').onclick = () => {
+      firstSeq += buffer.length;
+      buffer = [];
+      frozenLen = 0;
+      dirty = true;
+      render();
+    };
+    el('download').onclick = () => {
+      const blob = new Blob([visibleLines().join('\n')], { type: 'text/plain' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `heatbox-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    };
+    el('filter').oninput = () => { dirty = true; render(); };
+
+    async function sendCommand(command) {
+      const response = await fetch('/api/command', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command })
+      });
+      if (!response.ok) alert('Perintah ditolak atau serial belum terhubung.');
+    }
+    document.querySelectorAll('button[data-command]').forEach(
+      button => button.onclick = () => sendCommand(button.dataset.command));
+    el('calBtn').onclick = () => {
+      const grams = el('calGrams').value.trim();
+      if (!/^[0-9]+(\.[0-9]+)?$/.test(grams)) { alert('Isi berat anak timbangan dalam gram, mis. 10'); return; }
+      sendCommand(`c ${grams}`);
+    };
+
+    // ---------------- Kalibrasi multi-titik ----------------
+    // Ketidakpastian satu titik pada hardware ini ~0.5 mg (SD raw 20.9 count,
+    // 64 sampel, 5499 count/g). Beban di bawah WEAK_MG karena itu ditandai:
+    // angkanya akan didominasi noise, bukan massa.
+    const PRESETS_MG = [10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10];
+    const WEAK_MG = 50;
+    let pickedMg = null;
+    let busyUntil = 0;
+
+    const formatMg = mg => mg >= 1000 ? `${mg / 1000} g` : `${mg} mg`;
+
+    PRESETS_MG.forEach(mg => {
+      const button = document.createElement('button');
+      button.textContent = formatMg(mg);
+      button.className = mg < WEAK_MG ? 'weak' : '';
+      if (mg < WEAK_MG) button.title = 'Di bawah ~50 mg hasilnya didominasi noise pada load cell 300 g ini';
+      button.onclick = () => pickWeight(mg, button);
+      el('weights').appendChild(button);
+    });
+
+    function pickWeight(mg, button) {
+      pickedMg = mg;
+      el('calManual').value = '';
+      document.querySelectorAll('#weights button').forEach(b => b.classList.toggle('picked', b === button));
+      updateCalButtons();
+    }
+
+    function chosenMg() {
+      const manual = el('calManual').value.trim();
+      if (manual) return /^[0-9]+(\.[0-9]+)?$/.test(manual) ? Number(manual) : null;
+      return pickedMg;
+    }
+
+    function updateCalButtons() {
+      const busy = Date.now() < busyUntil;
+      el('calPoint').disabled = busy || chosenMg() === null;
+      el('calZero').disabled = busy;
+    }
+
+    function startMeasurement(command) {
+      busyUntil = Date.now() + 7500;
+      updateCalButtons();
+      sendCommand(command);
+      const tick = setInterval(() => {
+        const left = Math.ceil((busyUntil - Date.now()) / 1000);
+        if (left > 0) {
+          el('calState').textContent = `mengukur 64 sampel... ${left} s`;
+        } else {
+          clearInterval(tick);
+          updateCalButtons();
+          refreshCalibration();
+        }
+      }, 250);
+    }
+
+    el('calZero').onclick = () => startMeasurement('n');
+    el('calPoint').onclick = () => {
+      const mg = chosenMg();
+      if (mg === null) { alert('Pilih beban dulu, atau ketik nilainya dalam mg.'); return; }
+      const direction = document.querySelector('input[name=dir]:checked').value;
+      startMeasurement(`m ${mg} ${direction}`);
+    };
+    el('calManual').oninput = () => {
+      pickedMg = null;
+      document.querySelectorAll('#weights button').forEach(b => b.classList.remove('picked'));
+      updateCalButtons();
+    };
+    el('calCsv').onclick = () => window.open('/api/calibration.csv', '_blank');
+    el('calClear').onclick = async () => {
+      if (!confirm('Hapus semua titik kalibrasi sesi ini? Berkas CSV ikut dikosongkan.')) return;
+      await fetch('/api/calibration/clear', { method: 'POST' });
+      refreshCalibration();
+    };
+
+    let fittedCountsPerGram = null;
+    el('calApply').onclick = () => {
+      if (fittedCountsPerGram === null) return;
+      if (!confirm(`Kirim countsPerGram = ${fittedCountsPerGram.toFixed(3)} ke firmware dan simpan ke NVS?`)) return;
+      sendCommand(`s ${fittedCountsPerGram.toFixed(3)}`);
+    };
+
+    const num = (value, digits) => value === null || value === undefined ? '--' : value.toFixed(digits);
+
+    function renderCalibration(cal) {
+      el('calState').textContent = cal.pendingZero === null
+        ? 'nol belum direkam — mulai dari langkah 1'
+        : `nol terakhir ${cal.pendingZero.toFixed(2)} count | ${cal.points.length} titik terekam`;
+
+      const fit = cal.fit, stats = cal.metrics;
+      fittedCountsPerGram = fit ? fit.counts_per_gram : null;
+      el('calApply').disabled = fit === null;
+
+      if (!fit) {
+        el('calFit').textContent = cal.points.length
+          ? `${cal.points.length} titik terekam — butuh minimal 2 titik dengan nol untuk bisa difit.`
+          : 'Belum ada titik.';
+        el('calTable').innerHTML = '';
+        el('calReportBox').hidden = true;
+        return;
+      }
+
+      el('calFit').innerHTML =
+        `countsPerGram <span class="kv">${num(fit.counts_per_gram, 3)}</span> &nbsp;|&nbsp; ` +
+        `R<sup>2</sup> <span class="kv">${fit.r2.toFixed(6)}</span> &nbsp;|&nbsp; ` +
+        `residual maks <span class="kv">${num(stats.max_residual_mg, 3)} mg</span> &nbsp;|&nbsp; ` +
+        `RMS <span class="kv">${num(stats.rms_residual_mg, 3)} mg</span> &nbsp;|&nbsp; ` +
+        `nonlinearitas <span class="kv">${num(stats.nonlinearity_pct_fs, 4)} %FS</span> &nbsp;|&nbsp; ` +
+        `histeresis <span class="kv">${num(stats.hysteresis_mg, 3)} mg</span> &nbsp;|&nbsp; ` +
+        `repeatability <span class="kv">${num(stats.repeatability_mg, 3)} mg</span>`;
+
+      const head = ['nominal', 'arah', 'raw bersih', 'terukur (mg)', 'residual (mg)', '± (mg)', 'rasio S/N'];
+      const rows = cal.rows.slice().sort((a, b) => a.nominal_mg - b.nominal_mg || a.direction.localeCompare(b.direction));
+      el('calTable').innerHTML =
+        `<tr>${head.map(h => `<th>${h}</th>`).join('')}</tr>` +
+        rows.map(row => {
+          const snr = row.uncertainty_mg ? row.nominal_mg / row.uncertainty_mg : null;
+          const weak = snr !== null && snr < 10;
+          return `<tr>
+            <td>${formatMg(row.nominal_mg)}</td>
+            <td>${row.direction === 'U' ? 'naik' : 'turun'}</td>
+            <td>${num(row.net_counts, 2)}</td>
+            <td>${num(row.measured_mg, 3)}</td>
+            <td class="${Math.abs(row.residual_mg) > 5 * (row.uncertainty_mg || 1) ? 'warn' : ''}">${num(row.residual_mg, 3)}</td>
+            <td>${num(row.uncertainty_mg, 3)}</td>
+            <td class="${weak ? 'warn' : ''}">${snr === null ? '--' : snr.toFixed(1)}${weak ? ' (lemah)' : ''}</td>
+          </tr>`;
+        }).join('');
+
+      el('calReportBox').hidden = false;
+      el('calReport').textContent = cal.report;
+    }
+
+    async function refreshCalibration() {
+      try {
+        renderCalibration(await fetch('/api/calibration', { cache: 'no-store' }).then(r => r.json()));
+      } catch (error) { /* server sedang tidak merespons; biarkan tampilan lama */ }
+    }
+
+    updateCalButtons();
+    refreshCalibration();
+    refresh(); setInterval(refresh, 500); setInterval(refreshCalibration, 3000);
+  </script>
+</body>
+</html>

@@ -54,7 +54,10 @@
 namespace {
 
 constexpr const char* kNvsNamespace = "heatbox";
-constexpr const char* kNvsKeyOffset = "ads_offset";
+// Kunci baru: offset kini disimpan sebagai double. Memakai nama lama akan
+// bertabrakan tipe dengan nilai int yang sudah ada di NVS dan getDouble()
+// akan diam-diam mengembalikan nilai default.
+constexpr const char* kNvsKeyOffset = "ads_offset_d";
 constexpr const char* kNvsKeyScale = "ads_cpg";
 
 constexpr uint32_t kSignBit24 = 0x800000UL;
@@ -277,7 +280,50 @@ int32_t Ads1232::toSigned24(uint32_t code) {
 }
 
 // ---------------------------------------------------------------------
-//  Filter: median-of-5 -> moving average 16
+//  Statistik raw (sebelum filter apa pun)
+//
+//  Dipakai dua hal: laporan noise yang jujur, dan sigma untuk gerbang
+//  spike. Saat beban benar-benar berubah, window ini ikut memuat step
+//  sehingga SD-nya melonjak dan gerbang spike otomatis melonggar — itu
+//  memang yang diinginkan supaya perubahan asli tidak ikut ditolak.
+// ---------------------------------------------------------------------
+void Ads1232::updateRawStats(int32_t value) {
+    rawRing_[rawIdx_] = value;
+    rawIdx_ = static_cast<uint8_t>((rawIdx_ + 1) % kRawRingSize);
+    if (rawCount_ < kRawRingSize) {
+        ++rawCount_;
+    }
+    if (rawCount_ < kRawRingSize) {
+        rawStdDev_ = NAN;
+        rawPeakToPeak_ = 0;
+        return;
+    }
+
+    double sum = 0.0;
+    int32_t lowest = rawRing_[0];
+    int32_t highest = rawRing_[0];
+    for (uint8_t i = 0; i < kRawRingSize; ++i) {
+        sum += static_cast<double>(rawRing_[i]);
+        if (rawRing_[i] < lowest) lowest = rawRing_[i];
+        if (rawRing_[i] > highest) highest = rawRing_[i];
+    }
+    const double mean = sum / kRawRingSize;
+    double sumSq = 0.0;
+    for (uint8_t i = 0; i < kRawRingSize; ++i) {
+        const double d = static_cast<double>(rawRing_[i]) - mean;
+        sumSq += d * d;
+    }
+    rawStdDev_ = static_cast<float>(std::sqrt(sumSq / (kRawRingSize - 1)));
+    rawPeakToPeak_ = highest - lowest;
+}
+
+// ---------------------------------------------------------------------
+//  Filter: gerbang spike -> moving average 16
+//
+//  Sampel masuk apa adanya ke averager supaya rata-rata 16 sampel benar-
+//  benar memberi pengurangan noise sqrt(16). Median-of-5 hanya dipakai
+//  sebagai pengganti kalau sampel menyimpang > kSpikeGateSigma dari noise
+//  raw yang terukur.
 // ---------------------------------------------------------------------
 void Ads1232::processSample(int32_t value) {
     raw_ = value;
@@ -290,13 +336,24 @@ void Ads1232::processSample(int32_t value) {
     }
     const int32_t median = medianOfWindow();
 
+    updateRawStats(value);
+
+    int32_t accepted = value;
+    if (std::isnan(rawStdDev_)) {
+        accepted = median;  // dasar noise belum diketahui: pakai perilaku konservatif
+    } else if (std::fabs(static_cast<double>(value) - static_cast<double>(median)) >
+               static_cast<double>(kSpikeGateSigma) * static_cast<double>(rawStdDev_)) {
+        accepted = median;
+        ++spikesRejected_;
+    }
+
     if (avgCount_ == kAverageSize) {
         avgSum_ -= avgBuf_[avgIdx_];
     } else {
         ++avgCount_;
     }
-    avgBuf_[avgIdx_] = median;
-    avgSum_ += median;
+    avgBuf_[avgIdx_] = accepted;
+    avgSum_ += accepted;
     avgIdx_ = static_cast<uint8_t>((avgIdx_ + 1) % kAverageSize);
     filtered_ = static_cast<double>(avgSum_) / avgCount_;
 
@@ -315,7 +372,13 @@ void Ads1232::processSample(int32_t value) {
     newSample_ = true;
 
     if (job_ != Job::None) {
-        jobSum_ += median;  // pakai output median supaya spike tidak ikut
+        // raw setelah gerbang spike, bukan hasil median
+        if (jobCount_ == 0) {
+            jobBase_ = static_cast<double>(accepted);
+        }
+        const double delta = static_cast<double>(accepted) - jobBase_;
+        jobSum_ += delta;
+        jobSumSq_ += delta * delta;
         if (++jobCount_ >= kTareSamples) {
             finishJob();
         }
@@ -348,6 +411,10 @@ void Ads1232::resetFilters() {
     avgSum_ = 0;
     filtered_ = NAN;
     stdDev_ = NAN;
+    rawIdx_ = 0;
+    rawCount_ = 0;
+    rawStdDev_ = NAN;
+    rawPeakToPeak_ = 0;
     clipped_ = false;
     newSample_ = false;
 }
@@ -420,7 +487,9 @@ bool Ads1232::canStartJob() const {
 
 void Ads1232::startJob(Job job) {
     job_ = job;
-    jobSum_ = 0;
+    jobBase_ = 0.0;
+    jobSum_ = 0.0;
+    jobSumSq_ = 0.0;
     jobCount_ = 0;
 }
 
@@ -441,19 +510,40 @@ void Ads1232::calibrateWith(float knownGrams) {
     startJob(Job::Calibrate);
 }
 
+void Ads1232::measure() {
+    if (!canStartJob()) {
+        pushEvent(Event::JobRejected);
+        return;
+    }
+    measureMean_ = NAN;
+    measureSd_ = NAN;
+    measureSamples_ = 0;
+    startJob(Job::Measure);
+}
+
 void Ads1232::finishJob() {
-    const double mean = static_cast<double>(jobSum_) / jobCount_;
+    const double mean = jobBase_ + jobSum_ / jobCount_;
     const Job finished = job_;
     job_ = Job::None;
 
+    if (finished == Job::Measure) {
+        const double variance =
+            (jobSumSq_ - jobSum_ * jobSum_ / jobCount_) / static_cast<double>(jobCount_ - 1);
+        measureMean_ = mean;
+        measureSd_ = static_cast<float>(std::sqrt(variance > 0.0 ? variance : 0.0));
+        measureSamples_ = jobCount_;
+        pushEvent(Event::MeasureDone);
+        return;
+    }
+
     if (finished == Job::Tare) {
-        offset_ = static_cast<int32_t>(std::lround(mean));
+        offsetCounts_ = mean;  // pecahan count dipertahankan (1 count ~ 0.18 mg)
         hasOffset_ = true;
         pushEvent(saveCalibration() ? Event::TareDone : Event::NvsWriteFailed);
         return;
     }
 
-    const double span = mean - static_cast<double>(offset_);
+    const double span = mean - offsetCounts_;
     if (std::fabs(span) < kMinCalibrationSpanCounts) {
         pushEvent(Event::CalibrationFailed);
         return;
@@ -480,7 +570,7 @@ void Ads1232::setScale(float countsPerGram) {
 //  NVS (Preferences, namespace "heatbox")
 // ---------------------------------------------------------------------
 void Ads1232::loadCalibration() {
-    offset_ = kDefaultOffset;
+    offsetCounts_ = static_cast<double>(kDefaultOffset);
     countsPerGram_ = kDefaultCountsPerGram;
     hasOffset_ = false;
     hasScale_ = false;
@@ -490,7 +580,7 @@ void Ads1232::loadCalibration() {
         return;  // namespace belum pernah dibuat -> pakai default
     }
     if (prefs.isKey(kNvsKeyOffset)) {
-        offset_ = prefs.getInt(kNvsKeyOffset, kDefaultOffset);
+        offsetCounts_ = prefs.getDouble(kNvsKeyOffset, static_cast<double>(kDefaultOffset));
         hasOffset_ = true;
     }
     if (prefs.isKey(kNvsKeyScale)) {
@@ -509,7 +599,7 @@ bool Ads1232::saveCalibration() {
     if (!prefs.begin(kNvsNamespace, false)) {
         return false;
     }
-    bool ok = prefs.putInt(kNvsKeyOffset, offset_) > 0;
+    bool ok = prefs.putDouble(kNvsKeyOffset, offsetCounts_) > 0;
     if (hasScale_) {
         ok = (prefs.putFloat(kNvsKeyScale, countsPerGram_) > 0) && ok;
     }
@@ -556,13 +646,21 @@ float Ads1232::grams() const {
     if (std::isnan(filtered_)) {
         return NAN;
     }
-    return static_cast<float>((filtered_ - static_cast<double>(offset_)) /
-                              static_cast<double>(countsPerGram_));
+    return static_cast<float>((filtered_ - offsetCounts_) / static_cast<double>(countsPerGram_));
+}
+
+// Ambang dinyatakan dalam mg supaya tetap berarti kalau skala berubah;
+// jatuh kembali ke count selama belum ada kalibrasi.
+float Ads1232::stableThresholdCounts() const {
+    if (!hasScale_) {
+        return kStableStdDevCounts;
+    }
+    return kStableStdDevMg * std::fabs(countsPerGram_) / 1000.0f;
 }
 
 bool Ads1232::isStable() const {
     return state_ == State::Running && avgCount_ == kAverageSize &&
-           stdDev_ < kStableStdDevCounts;
+           stdDev_ < stableThresholdCounts();
 }
 
 Ads1232::Health Ads1232::health() const { return health_; }
@@ -587,9 +685,16 @@ bool Ads1232::drdyTimedOut() const {
 
 bool Ads1232::doutError() const { return errorStreak_ > 0; }
 float Ads1232::countsPerGram() const { return countsPerGram_; }
-int32_t Ads1232::offset() const { return offset_; }
+int32_t Ads1232::offset() const { return static_cast<int32_t>(std::lround(offsetCounts_)); }
+double Ads1232::offsetCounts() const { return offsetCounts_; }
 float Ads1232::filteredCounts() const { return static_cast<float>(filtered_); }
 float Ads1232::stdDevCounts() const { return stdDev_; }
+float Ads1232::rawStdDevCounts() const { return rawStdDev_; }
+int32_t Ads1232::rawPeakToPeakCounts() const { return rawPeakToPeak_; }
+uint32_t Ads1232::spikesRejected() const { return spikesRejected_; }
+double Ads1232::measureMean() const { return measureMean_; }
+float Ads1232::measureSd() const { return measureSd_; }
+uint8_t Ads1232::measureSamples() const { return measureSamples_; }
 uint32_t Ads1232::firstDrdyMs() const { return firstDrdyMs_; }
 uint32_t Ads1232::lastDrdyIntervalMs() const { return lastDrdyIntervalMs_; }
 uint32_t Ads1232::lastSelfCalMs() const { return lastSelfCalMs_; }

@@ -35,6 +35,13 @@ RtdSensor rtd({PIN_MAX_CS, PIN_MAX_SCK, PIN_MAX_MISO, PIN_MAX_MOSI, RTD_WIRES, R
 Ads1232 loadCell({PIN_ADS_SCLK, PIN_ADS_DOUT, PIN_ADS_PDWN});
 EncoderInput encoder({PIN_ENC_A, PIN_ENC_B, PIN_ENC_SW});
 
+// Kalibrasi multi-titik: firmware hanya MENGUKUR dan MENCETAK. Penyimpanan,
+// fit, dan metrik dikerjakan di PC (tuning_web), sesuai arsitektur proyek.
+enum class MeasureKind : uint8_t { None, Zero, Point };
+MeasureKind pendingMeasure = MeasureKind::None;
+float pendingNominalMg = 0.0f;
+char pendingDirection = 'U';
+
 ReportMode reportMode = ReportMode::Human;
 uint32_t lastReportMs = 0;
 char buttonLatch = '-';  // 'S' / 'L' ditahan sampai tercetak di report
@@ -86,8 +93,9 @@ void printBanner() {
     Serial.printf(" RTD     : PT%.0f %s, RNOMINAL=%.1f ohm, RREF=%.1f ohm, filter 50 Hz, %" PRIu32 " ms/sampel\n",
                   RTD_RNOMINAL, wireModeText(), RTD_RNOMINAL, RTD_RREF, RtdSensor::kSamplePeriodMs);
     Serial.println(" ADS1232 : asumsi jumper GAIN=128, SPEED=10 SPS, A0=GND (AIN1)");
-    Serial.printf("           filter median-%u -> moving average %u, stabil jika SD < %.1f count\n",
-                  static_cast<unsigned>(Ads1232::kMedianSize), static_cast<unsigned>(Ads1232::kAverageSize), Ads1232::kStableStdDevCounts);
+    Serial.printf("           gerbang spike %.0f sigma (median-%u) -> moving average %u, stabil jika SD < %.1f mg\n",
+                  Ads1232::kSpikeGateSigma, static_cast<unsigned>(Ads1232::kMedianSize),
+                  static_cast<unsigned>(Ads1232::kAverageSize), Ads1232::kStableStdDevMg);
     Serial.println("==============================================================");
 }
 
@@ -95,7 +103,10 @@ void printHelp() {
     logLine("Perintah (akhiri dengan Enter):");
     logLine("  t          tare (%u sampel, ~%.1f s)", static_cast<unsigned>(Ads1232::kTareSamples),
             samplesToSeconds(Ads1232::kTareSamples));
-    logLine("  c <gram>   kalibrasi dengan anak timbangan, contoh: c 200");
+    logLine("  c <gram>   kalibrasi 1 titik dengan anak timbangan, contoh: c 200");
+    logLine("  n          rekam titik NOL (timbangan kosong) -> baris CALZERO");
+    logLine("  m <mg> <u|d>  rekam titik kalibrasi -> baris CALPT; u=naik, d=turun");
+    logLine("  s <cpg>    set countsPerGram langsung (dipakai hasil fit dari PC)");
     logLine("  z          offset self-calibration ADS1232 (lalu tare ulang)");
     logLine("  r          reset ADS1232 (PDWN cycle)");
     logLine("  v          ganti mode report: human readable <-> CSV");
@@ -106,7 +117,7 @@ void printHelp() {
 
 void printCalibration() {
     logLine("Kalibrasi load cell (NVS):");
-    logLine("  offset        = %" PRId32 " count%s", loadCell.offset(),
+    logLine("  offset        = %.2f count%s", loadCell.offsetCounts(),
             loadCell.hasStoredOffset() ? "" : "  (default, belum pernah tare)");
     logLine("  countsPerGram = %.3f%s", loadCell.countsPerGram(),
             loadCell.isCalibrated() ? "" : "  (default perkiraan 1 mV/V)");
@@ -128,8 +139,22 @@ void printAdsDiagnostics() {
                 loadCell.lastSelfCalMs(), Ads1232::kSelfCalNominalMs);
     }
     logLine("  protocol error total      = %" PRIu32, loadCell.protocolErrorCount());
-    logLine("  SD window moving average  = %.2f count (ambang stabil %.2f)",
-            loadCell.stdDevCounts(), Ads1232::kStableStdDevCounts);
+    logLine("  SD window moving average  = %.2f count (ambang stabil %.2f) <- SETELAH filter",
+            loadCell.stdDevCounts(), loadCell.stableThresholdCounts());
+
+    const float rawSd = loadCell.rawStdDevCounts();
+    const int32_t rawPp = loadCell.rawPeakToPeakCounts();
+    if (loadCell.isCalibrated()) {
+        const float mgPerCount = 1000.0f / std::fabs(loadCell.countsPerGram());
+        logLine("  noise raw (%u sampel)      = SD %.2f count = %.3f mg, p-p %" PRId32 " count = %.3f mg",
+                static_cast<unsigned>(Ads1232::kRawRingSize), rawSd, rawSd * mgPerCount, rawPp,
+                static_cast<float>(rawPp) * mgPerCount);
+    } else {
+        logLine("  noise raw (%u sampel)      = SD %.2f count, p-p %" PRId32 " count  (mg: --- UNCALIBRATED)",
+                static_cast<unsigned>(Ads1232::kRawRingSize), rawSd, rawPp);
+    }
+    logLine("  spike ditolak gerbang     = %" PRIu32 " sampel (ambang %.1f sigma)",
+            loadCell.spikesRejected(), Ads1232::kSpikeGateSigma);
     if (loadCell.lastShiftDurationUs() > Ads1232::kMaxShiftDurationUs) {
         logLine("  WARNING: shift-out melebihi batas desain, cek beban CPU / interrupt");
     }
@@ -237,6 +262,34 @@ void runHealthCheck() {
 }
 
 // =====================================================================
+//  Hasil pengukuran kalibrasi multi-titik
+//
+//  Baris CALZERO/CALPT sengaja TIDAK diawali "# " supaya parser di PC
+//  bisa membedakannya dari log biasa. Yang dicetak adalah RAW COUNTS,
+//  bukan gram, supaya data tetap berguna kalau rumus konversi diganti.
+// =====================================================================
+void printMeasureResult() {
+    const MeasureKind kind = pendingMeasure;
+    pendingMeasure = MeasureKind::None;
+    if (kind == MeasureKind::None) {
+        return;
+    }
+
+    if (kind == MeasureKind::Zero) {
+        Serial.printf("CALZERO,%" PRIu32 ",%.2f,%.2f,%u,%.2f,%.2f\n", millis(),
+                      loadCell.measureMean(), loadCell.measureSd(),
+                      static_cast<unsigned>(loadCell.measureSamples()), rtd.rtdResistance(),
+                      rtd.tempC());
+        return;
+    }
+
+    Serial.printf("CALPT,%" PRIu32 ",%.3f,%c,%.2f,%.2f,%u,%.2f,%.2f\n", millis(), pendingNominalMg,
+                  pendingDirection, loadCell.measureMean(), loadCell.measureSd(),
+                  static_cast<unsigned>(loadCell.measureSamples()), rtd.rtdResistance(),
+                  rtd.tempC());
+}
+
+// =====================================================================
 //  Event dari driver
 // =====================================================================
 void reportLoadCellEvents() {
@@ -249,7 +302,7 @@ void reportLoadCellEvents() {
                 reportAdsWakeupTiming();
                 break;
             case Ads1232::Event::TareDone:
-                logLine("Tare selesai: offset = %" PRId32 " count (tersimpan di NVS)", loadCell.offset());
+                logLine("Tare selesai: offset = %.2f count (tersimpan di NVS)", loadCell.offsetCounts());
                 break;
             case Ads1232::Event::CalibrationDone:
                 logLine("Kalibrasi selesai: countsPerGram = %.3f (tersimpan di NVS)",
@@ -266,6 +319,9 @@ void reportLoadCellEvents() {
             case Ads1232::Event::SelfCalTimeout:
                 logLine("Self-calibration TIMEOUT: DRDY tidak turun dalam %" PRIu32 " ms",
                         Ads1232::kSelfCalTimeoutMs);
+                break;
+            case Ads1232::Event::MeasureDone:
+                printMeasureResult();
                 break;
             case Ads1232::Event::JobRejected:
                 logLine("ADS1232: perintah ditolak (sedang sibuk / argumen tidak valid)");
@@ -445,6 +501,65 @@ void commandCalibrate(char* args) {
     }
 }
 
+void commandMeasureZero() {
+    if (loadCell.isBusy()) {
+        logLine("Rekam nol ditolak: ADS1232 sedang sibuk");
+        return;
+    }
+    pendingMeasure = MeasureKind::Zero;
+    loadCell.measure();
+    if (!loadCell.isBusy()) {
+        pendingMeasure = MeasureKind::None;
+        return;
+    }
+    logLine("Rekam titik NOL (%u sampel, ~%.1f s)...", static_cast<unsigned>(Ads1232::kTareSamples),
+            samplesToSeconds(Ads1232::kTareSamples));
+}
+
+// m <mg> <u|d>
+void commandMeasurePoint(char* args) {
+    char* end = nullptr;
+    const float nominalMg = strtof(args, &end);
+    if (end == args || !std::isfinite(nominalMg) || nominalMg <= 0.0f) {
+        logLine("Format: m <mg> <u|d>  contoh: m 10000 u  (10 g, arah naik)");
+        return;
+    }
+    char* rest = skipBlanks(end);
+    const char direction = static_cast<char>(toupper(static_cast<unsigned char>(*rest)));
+    if ((direction != 'U' && direction != 'D') || *skipBlanks(rest + 1) != '\0') {
+        logLine("Format: m <mg> <u|d>  u = naik (loading), d = turun (unloading)");
+        return;
+    }
+    if (loadCell.isBusy()) {
+        logLine("Rekam titik ditolak: ADS1232 sedang sibuk");
+        return;
+    }
+
+    pendingNominalMg = nominalMg;
+    pendingDirection = direction;
+    pendingMeasure = MeasureKind::Point;
+    loadCell.measure();
+    if (!loadCell.isBusy()) {
+        pendingMeasure = MeasureKind::None;
+        return;
+    }
+    logLine("Rekam titik %.3f mg arah %c (%u sampel, ~%.1f s)...", nominalMg, direction,
+            static_cast<unsigned>(Ads1232::kTareSamples), samplesToSeconds(Ads1232::kTareSamples));
+}
+
+// s <countsPerGram> — menerapkan hasil fit yang dihitung di PC
+void commandSetScale(char* args) {
+    char* end = nullptr;
+    const float countsPerGram = strtof(args, &end);
+    if (end == args || *skipBlanks(end) != '\0' || !std::isfinite(countsPerGram) ||
+        std::fabs(countsPerGram) < Ads1232::kMinAbsCountsPerGram) {
+        logLine("Format: s <countsPerGram>  contoh: s 5499.03");
+        return;
+    }
+    loadCell.setScale(countsPerGram);
+    logLine("countsPerGram di-set ke %.3f (tersimpan di NVS)", loadCell.countsPerGram());
+}
+
 void commandSelfCalibrate() {
     if (loadCell.selfCalibrate()) {
         logLine("Offset self-calibration dimulai pada DRDY berikutnya (~%" PRIu32 " ms)...",
@@ -483,6 +598,14 @@ void handleCommand(char* line) {
         commandCalibrate(args);
         return;
     }
+    if (command == 'm') {
+        commandMeasurePoint(args);
+        return;
+    }
+    if (command == 's') {
+        commandSetScale(args);
+        return;
+    }
     if (*args != '\0') {
         logLine("Perintah tidak dikenal: '%s' (ketik ? untuk bantuan)", line);
         return;
@@ -491,6 +614,9 @@ void handleCommand(char* line) {
     switch (command) {
         case 't':
             commandTare();
+            break;
+        case 'n':
+            commandMeasureZero();
             break;
         case 'z':
             commandSelfCalibrate();

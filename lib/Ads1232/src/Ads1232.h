@@ -40,6 +40,7 @@ public:
         CalibrationFailed,  // selisih count terlalu kecil (beban tidak terdeteksi)
         SelfCalDone,
         SelfCalTimeout,
+        MeasureDone,        // pengukuran raw selesai, hasil di measureMean()/measureSd()
         JobRejected,        // perintah ditolak (sedang sibuk / argumen tidak valid)
         JobCanceled,        // tare/kalibrasi dibatalkan oleh reset()
         ProtocolError,      // DOUT tidak dilepas HIGH setelah pulsa terakhir
@@ -90,15 +91,29 @@ public:
 
     // -----------------------------------------------------------------
     //  Filter & deteksi stabil
+    //
+    //  Median-of-5 TIDAK dipakai sebagai filter permanen: median sliding
+    //  membuat output berurutan berkorelasi, sehingga rata-rata 16 sampel
+    //  tidak memberi pengurangan noise sqrt(16). Median hanya dipakai
+    //  sebagai pengganti saat sampel dinilai spike (lihat processSample).
     // -----------------------------------------------------------------
     static constexpr uint8_t kMedianSize = 5;
     static constexpr uint8_t kAverageSize = 16;
-    static constexpr float kStableStdDevCounts = 3.0f;  // ambang isStable(), tuning di sini
+    static constexpr uint8_t kRawRingSize = 64;  // dasar noise raw & gerbang spike
+    static constexpr float kSpikeGateSigma = 6.0f;
+
+    // Ambang isStable(). Ini sebaran SATU sampel di dalam window, bukan
+    // ketidakpastian rata-ratanya: rata-rata 16 sampel independen ~4x lebih
+    // baik dari angka ini. Diukur di hardware 2025-09: SD raw 20.9 count
+    // (3.8 mg pada 5499 count/g), jadi ambang lama 3.0 count mustahil
+    // tercapai dan status STABLE tidak pernah muncul.
+    static constexpr float kStableStdDevMg = 6.0f;
+    static constexpr float kStableStdDevCounts = 35.0f;  // dipakai saat belum terkalibrasi
 
     // -----------------------------------------------------------------
     //  Tare & kalibrasi
     // -----------------------------------------------------------------
-    static constexpr uint8_t kTareSamples = 32;               // tare & calibrateWith()
+    static constexpr uint8_t kTareSamples = 64;               // tare & calibrateWith()
     static constexpr int32_t kMinCalibrationSpanCounts = 1000; // beban kalibrasi minimal (count)
     static constexpr float kMinAbsCountsPerGram = 0.001f;     // guard scale nol / rusak
     static constexpr int32_t kDefaultOffset = 0;
@@ -135,6 +150,9 @@ public:
     void tare();                           // rata-rata kTareSamples sampel -> offset (background)
     void setScale(float countsPerGram);    // langsung disimpan ke NVS
     void calibrateWith(float knownGrams);  // pakai anak timbangan (background)
+    // Kumpulkan kTareSamples raw TANPA mengubah kalibrasi. Hasil lewat
+    // Event::MeasureDone; dipakai kalibrasi multi-titik yang fit-nya di PC.
+    void measure();
     bool selfCalibrate();                  // offset self-calibration ADS1232, false kalau ditolak
     bool isStable() const;
 
@@ -154,9 +172,19 @@ public:
     bool drdyTimedOut() const;
     bool doutError() const;        // protocol error terakhir belum pulih
     float countsPerGram() const;
-    int32_t offset() const;
+    int32_t offset() const;          // pembulatan untuk tampilan; grams() pakai presisi penuh
+    double offsetCounts() const;
     float filteredCounts() const;
+    // Noise SETELAH filter. Dipakai isStable(); JANGAN dipakai untuk laporan
+    // spesifikasi — untuk itu pakai rawStdDevCounts().
     float stdDevCounts() const;    // NAN sampai window moving average penuh
+    float rawStdDevCounts() const;      // noise sebenarnya, sebelum filter
+    int32_t rawPeakToPeakCounts() const;
+    uint32_t spikesRejected() const;
+    float stableThresholdCounts() const;
+    double measureMean() const;      // valid setelah Event::MeasureDone
+    float measureSd() const;
+    uint8_t measureSamples() const;
     uint32_t firstDrdyMs() const;  // PDWN HIGH -> DRDY pertama
     uint32_t lastDrdyIntervalMs() const;
     uint32_t lastSelfCalMs() const;
@@ -165,12 +193,13 @@ public:
 
 private:
     enum class State : uint8_t { Off, PowerDown, Settling, Running, Calibrating };
-    enum class Job : uint8_t { None, Tare, Calibrate };
+    enum class Job : uint8_t { None, Tare, Calibrate, Measure };
 
     void enterState(State next);
     void handleDataReady();
     bool shiftOut(uint8_t pulses, uint32_t& code);
     void processSample(int32_t value);
+    void updateRawStats(int32_t value);
     void resetFilters();
     int32_t medianOfWindow() const;
     bool canStartJob() const;
@@ -217,18 +246,30 @@ private:
     int64_t avgSum_ = 0;
     double filtered_ = NAN;
     float stdDev_ = NAN;
+    int32_t rawRing_[kRawRingSize] = {};
+    uint8_t rawIdx_ = 0;
+    uint8_t rawCount_ = 0;
+    float rawStdDev_ = NAN;
+    int32_t rawPeakToPeak_ = 0;
+    uint32_t spikesRejected_ = 0;
 
     // kalibrasi
-    int32_t offset_ = kDefaultOffset;
+    double offsetCounts_ = static_cast<double>(kDefaultOffset);
     float countsPerGram_ = kDefaultCountsPerGram;
     bool hasScale_ = false;
     bool hasOffset_ = false;
 
-    // job background
+    // job background. Penjumlahan relatif terhadap jobBase_ (sampel pertama)
+    // supaya varians tidak hilang presisi terhadap mean yang besar.
     Job job_ = Job::None;
-    int64_t jobSum_ = 0;
+    double jobBase_ = 0.0;
+    double jobSum_ = 0.0;
+    double jobSumSq_ = 0.0;
     uint8_t jobCount_ = 0;
     float jobKnownGrams_ = 0.0f;
+    double measureMean_ = NAN;
+    float measureSd_ = NAN;
+    uint8_t measureSamples_ = 0;
 
     // antrian event
     Event events_[kEventQueueSize] = {};
