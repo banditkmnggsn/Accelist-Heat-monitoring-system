@@ -89,11 +89,23 @@ public:
     // otomatis setelah laporan diambil.
     bool takeFaultReport(uint8_t& faultCode);
 
+    // Jalankan automatic fault-detection cycle BARU lalu pulihkan
+    // auto-convert + bias. Hanya siklus ini yang men-set bit D5/D4/D3
+    // (deteksi FORCE-/RTDIN- terputus); membaca register saat berjalan
+    // hanya memberi nilai latched dari siklus terakhir, sehingga
+    // `fault 0x00` di log TIDAK membuktikan pengawatan benar.
+    uint8_t runFaultDetectionCycle();
+
     // ---- diagnostik ----
     bool spiOk() const;
     uint8_t initFault() const;       // hasil fault-detection cycle saat begin()
     uint8_t configRegister() const;  // register config setelah begin()
+    uint8_t liveConfigRegister();    // membaca register config saat ini
     uint16_t rawCode() const;        // kode RTD 15 bit terakhir
+    uint16_t rawRegister() const;    // register RTD 16 bit mentah, termasuk D0
+    float ratio() const;             // rawCode / 32768, besaran yang benar-benar diukur cip
+    float thresholdLowOhm() const;
+    float thresholdHighOhm() const;
 
     // Decode bit Fault Status Register ke teks, dipisah koma
     static void printFault(Print& out, uint8_t faultCode);
@@ -116,6 +128,7 @@ private:
     uint32_t sampleCount_ = 0;
 
     uint16_t rawCode_ = 0;
+    uint16_t rawRegister_ = 0;
     float resistance_ = NAN;
     float tempC_ = NAN;
     uint8_t fault_ = 0;

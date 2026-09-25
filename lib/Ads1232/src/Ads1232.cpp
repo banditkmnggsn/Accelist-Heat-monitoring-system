@@ -299,22 +299,36 @@ void Ads1232::updateRawStats(int32_t value) {
         return;
     }
 
+    // Kemiringan dibuang lebih dulu. Tanpa ini, drift ikut terhitung sebagai
+    // noise: pada drift 10 count/s, ramp di window 6.4 s saja sudah
+    // menyumbang SD 19 count, yang sepenuhnya bukan noise.
+    constexpr double kMeanIndex = (kRawRingSize - 1) / 2.0;
+    constexpr double kSumSqIndex =
+        kRawRingSize * (static_cast<double>(kRawRingSize) * kRawRingSize - 1.0) / 12.0;
+
     double sum = 0.0;
-    int32_t lowest = rawRing_[0];
-    int32_t highest = rawRing_[0];
+    double sumXy = 0.0;
     for (uint8_t i = 0; i < kRawRingSize; ++i) {
-        sum += static_cast<double>(rawRing_[i]);
-        if (rawRing_[i] < lowest) lowest = rawRing_[i];
-        if (rawRing_[i] > highest) highest = rawRing_[i];
+        // rawIdx_ menunjuk slot tertua
+        const double value = static_cast<double>(rawRing_[(rawIdx_ + i) % kRawRingSize]);
+        sum += value;
+        sumXy += (static_cast<double>(i) - kMeanIndex) * value;
     }
     const double mean = sum / kRawRingSize;
+    const double slope = sumXy / kSumSqIndex;
+
     double sumSq = 0.0;
+    double lowest = 0.0;
+    double highest = 0.0;
     for (uint8_t i = 0; i < kRawRingSize; ++i) {
-        const double d = static_cast<double>(rawRing_[i]) - mean;
-        sumSq += d * d;
+        const double value = static_cast<double>(rawRing_[(rawIdx_ + i) % kRawRingSize]);
+        const double residual = value - (mean + slope * (static_cast<double>(i) - kMeanIndex));
+        sumSq += residual * residual;
+        if (i == 0 || residual < lowest) lowest = residual;
+        if (i == 0 || residual > highest) highest = residual;
     }
-    rawStdDev_ = static_cast<float>(std::sqrt(sumSq / (kRawRingSize - 1)));
-    rawPeakToPeak_ = highest - lowest;
+    rawStdDev_ = static_cast<float>(std::sqrt(sumSq / (kRawRingSize - 2)));
+    rawPeakToPeak_ = static_cast<int32_t>(std::lround(highest - lowest));
 }
 
 // ---------------------------------------------------------------------
@@ -347,18 +361,39 @@ void Ads1232::processSample(int32_t value) {
         ++spikesRejected_;
     }
 
-    if (avgCount_ == kAverageSize) {
-        avgSum_ -= avgBuf_[avgIdx_];
-    } else {
-        ++avgCount_;
-    }
     avgBuf_[avgIdx_] = accepted;
-    avgSum_ += accepted;
-    avgIdx_ = static_cast<uint8_t>((avgIdx_ + 1) % kAverageSize);
-    filtered_ = static_cast<double>(avgSum_) / avgCount_;
+    avgIdx_ = static_cast<uint8_t>((avgIdx_ + 1) % kAverageMax);
+    if (avgFill_ < kAverageMax) {
+        ++avgFill_;
+    }
 
-    // Rentang pergerakan keluaran: dasar deteksi stabil
-    stableRing_[stableIdx_] = filtered_;
+    // Window dipendekkan hanya kalau median (tahan spike, tapi ikut
+    // perubahan bertahan) menyimpang jauh dari keluaran sekarang. Ambangnya
+    // memakai quietStdDev_, BUKAN rawStdDev_: saat beban berubah, step itu
+    // sendiri melonjakkan rawStdDev_ sampai ambangnya melebihi step-nya,
+    // sehingga reset tertunda sepanjang ring raw (6,4 s).
+    const bool loadChanged = !std::isnan(filtered_) && !std::isnan(quietStdDev_) &&
+                             std::fabs(static_cast<double>(median) - filtered_) >
+                                 static_cast<double>(kStepSigma) * static_cast<double>(quietStdDev_);
+
+    if (!std::isnan(rawStdDev_) && !loadChanged) {
+        quietStdDev_ = std::isnan(quietStdDev_) ? rawStdDev_
+                                                : 0.9f * quietStdDev_ + 0.1f * rawStdDev_;
+    }
+
+    if (loadChanged) {
+        avgWindow_ = kAverageMin;
+    } else if (avgWindow_ < kAverageMax) {
+        ++avgWindow_;
+    }
+
+    filtered_ = meanOfLast(avgWindow_);
+    stabilityValue_ = meanOfLast(kAverageMin);
+
+    // Rentang pergerakan keluaran: dasar deteksi stabil. Sengaja memakai
+    // rata-rata 16 sampel TETAP, bukan keluaran adaptif, supaya arti STABLE
+    // tidak berubah ketika window memanjang.
+    stableRing_[stableIdx_] = stabilityValue_;
     stableIdx_ = static_cast<uint8_t>((stableIdx_ + 1) % kStableWindow);
     if (stableCount_ < kStableWindow) {
         ++stableCount_;
@@ -373,14 +408,24 @@ void Ads1232::processSample(int32_t value) {
         stableSpan_ = static_cast<float>(highest - lowest);
     }
 
-    if (avgCount_ == kAverageSize) {
-        // standar deviasi sampel (n-1) dari isi window moving average
+    if (std::isnan(stableSpan_)) {
+        stableLatched_ = false;
+    } else {
+        const float threshold =
+            stableThresholdCounts() * (stableLatched_ ? kStableExitFactor : 1.0f);
+        stableLatched_ = stableSpan_ < threshold;
+    }
+
+    if (avgFill_ >= kAverageMin) {
+        // standar deviasi sampel (n-1) dari kAverageMin sampel terakhir
         double sumSq = 0.0;
-        for (uint8_t i = 0; i < kAverageSize; ++i) {
-            const double d = static_cast<double>(avgBuf_[i]) - filtered_;
+        for (uint8_t i = 0; i < kAverageMin; ++i) {
+            const uint8_t slot =
+                static_cast<uint8_t>((avgIdx_ + kAverageMax - 1 - i) % kAverageMax);
+            const double d = static_cast<double>(avgBuf_[slot]) - stabilityValue_;
             sumSq += d * d;
         }
-        stdDev_ = static_cast<float>(std::sqrt(sumSq / (kAverageSize - 1)));
+        stdDev_ = static_cast<float>(std::sqrt(sumSq / (kAverageMin - 1)));
     } else {
         stdDev_ = NAN;
     }
@@ -399,6 +444,41 @@ void Ads1232::processSample(int32_t value) {
             finishJob();
         }
     }
+}
+
+// Rata-rata `count` sampel terakhir di ring avgBuf_. Dihitung ulang tiap
+// sampel (maks 128 penjumlahan @10 SPS) supaya panjang window bisa berubah
+// tanpa perlu menjaga penjumlahan berjalan yang konsisten.
+double Ads1232::meanOfLast(uint8_t count) const {
+    const uint8_t usable = (count < avgFill_) ? count : avgFill_;
+    if (usable == 0) {
+        return NAN;
+    }
+    double sum = 0.0;
+    for (uint8_t i = 0; i < usable; ++i) {
+        const uint8_t slot = static_cast<uint8_t>((avgIdx_ + kAverageMax - 1 - i) % kAverageMax);
+        sum += static_cast<double>(avgBuf_[slot]);
+    }
+    return sum / usable;
+}
+
+// Kemiringan keluaran dari selisih rata-rata separuh awal dan separuh akhir
+// window stabil. Lebih tahan noise daripada regresi penuh dan cukup untuk
+// menjawab "apakah masih merayap".
+float Ads1232::driftCountsPerSecond() const {
+    if (stableCount_ < kStableWindow) {
+        return NAN;
+    }
+    constexpr uint8_t kHalf = kStableWindow / 2;
+    double early = 0.0;
+    double late = 0.0;
+    for (uint8_t i = 0; i < kHalf; ++i) {
+        // stableIdx_ menunjuk slot tertua
+        early += stableRing_[(stableIdx_ + i) % kStableWindow];
+        late += stableRing_[(stableIdx_ + kHalf + i) % kStableWindow];
+    }
+    const double perSample = (late - early) / kHalf / kHalf;
+    return static_cast<float>(perSample * 1000.0 / kConversionPeriodMs);
 }
 
 int32_t Ads1232::medianOfWindow() const {
@@ -423,9 +503,10 @@ void Ads1232::resetFilters() {
     medianIdx_ = 0;
     medianCount_ = 0;
     avgIdx_ = 0;
-    avgCount_ = 0;
-    avgSum_ = 0;
+    avgFill_ = 0;
+    avgWindow_ = kAverageMin;
     filtered_ = NAN;
+    stabilityValue_ = NAN;
     stdDev_ = NAN;
     rawIdx_ = 0;
     rawCount_ = 0;
@@ -434,6 +515,8 @@ void Ads1232::resetFilters() {
     stableIdx_ = 0;
     stableCount_ = 0;
     stableSpan_ = NAN;
+    stableLatched_ = false;
+    quietStdDev_ = NAN;
     clipped_ = false;
     newSample_ = false;
 }
@@ -678,10 +761,10 @@ float Ads1232::stableThresholdCounts() const {
 }
 
 // Stabil = angka yang tampil tidak bergerak lebih dari ambang selama
-// kStableWindow sampel terakhir.
+// kStableWindow sampel terakhir. Keputusannya dihitung di processSample()
+// karena memakai histeresis, yang butuh status sebelumnya.
 bool Ads1232::isStable() const {
-    return state_ == State::Running && stableCount_ == kStableWindow &&
-           !std::isnan(stableSpan_) && stableSpan_ < stableThresholdCounts();
+    return state_ == State::Running && stableCount_ == kStableWindow && stableLatched_;
 }
 
 Ads1232::Health Ads1232::health() const { return health_; }
@@ -711,6 +794,7 @@ double Ads1232::offsetCounts() const { return offsetCounts_; }
 float Ads1232::filteredCounts() const { return static_cast<float>(filtered_); }
 float Ads1232::stdDevCounts() const { return stdDev_; }
 float Ads1232::stableSpanCounts() const { return stableSpan_; }
+uint8_t Ads1232::averageWindow() const { return avgWindow_; }
 float Ads1232::rawStdDevCounts() const { return rawStdDev_; }
 int32_t Ads1232::rawPeakToPeakCounts() const { return rawPeakToPeak_; }
 uint32_t Ads1232::spikesRejected() const { return spikesRejected_; }

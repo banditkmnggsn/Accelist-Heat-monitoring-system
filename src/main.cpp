@@ -46,6 +46,9 @@ ReportMode reportMode = ReportMode::Human;
 uint32_t lastReportMs = 0;
 char buttonLatch = '-';  // 'S' / 'L' ditahan sampai tercetak di report
 bool adsTimeoutReported = false;
+bool autoTarePending = true;  // initial zero setting, dikerjakan sekali per boot
+bool settledReported = false;
+uint32_t lastRtdCheckMs = 0;
 
 char commandBuffer[app::kCommandBufferSize];
 size_t commandLength = 0;
@@ -93,9 +96,10 @@ void printBanner() {
     Serial.printf(" RTD     : PT%.0f %s, RNOMINAL=%.1f ohm, RREF=%.1f ohm, filter 50 Hz, %" PRIu32 " ms/sampel\n",
                   RTD_RNOMINAL, wireModeText(), RTD_RNOMINAL, RTD_RREF, RtdSensor::kSamplePeriodMs);
     Serial.println(" ADS1232 : asumsi jumper GAIN=128, SPEED=10 SPS, A0=GND (AIN1)");
-    Serial.printf("           gerbang spike %.0f sigma (median-%u) -> moving average %u\n",
+    Serial.printf("           gerbang spike %.0f sigma (median-%u) -> rata-rata adaptif %u..%u sampel\n",
                   Ads1232::kSpikeGateSigma, static_cast<unsigned>(Ads1232::kMedianSize),
-                  static_cast<unsigned>(Ads1232::kAverageSize));
+                  static_cast<unsigned>(Ads1232::kAverageMin),
+                  static_cast<unsigned>(Ads1232::kAverageMax));
     Serial.printf("           STABLE jika angka bergerak < %.1f mg selama %u sampel (%.1f s)\n",
                   Ads1232::kStableSpanMg, static_cast<unsigned>(Ads1232::kStableWindow),
                   samplesToSeconds(Ads1232::kStableWindow));
@@ -115,6 +119,7 @@ void printHelp() {
     logLine("  v          ganti mode report: human readable <-> CSV");
     logLine("  e          reset posisi encoder ke 0");
     logLine("  p          cetak kalibrasi tersimpan + diagnostik ADS1232");
+    logLine("  x          panel diagnostik MAX31865 + fault-detection cycle BARU");
     logLine("  ?          bantuan ini");
 }
 
@@ -156,22 +161,124 @@ void printAdsDiagnostics() {
     }
     logLine("  SD window moving average  = %.2f count  (info saja, bukan dasar STABLE)",
             loadCell.stdDevCounts());
+    logLine("  window rata-rata adaptif  = %u sampel (%.1f s) dari maks %u",
+            static_cast<unsigned>(loadCell.averageWindow()),
+            samplesToSeconds(loadCell.averageWindow()),
+            static_cast<unsigned>(Ads1232::kAverageMax));
+
+    const float drift = loadCell.driftCountsPerSecond();
+    if (loadCell.isCalibrated()) {
+        const float mgPerCount = 1000.0f / std::fabs(loadCell.countsPerGram());
+        logLine("  LAJU DRIFT                = %+.2f count/s = %+.2f mg/menit",
+                drift, drift * 60.0f * mgPerCount);
+        logLine("    Ini angka yang menentukan kapan boleh tare, bukan STABLE.");
+        logLine("    Di bawah ~%.0f mg/menit berarti sudah setimbang termal.",
+                app::kSettledDriftMgPerMin);
+    } else {
+        logLine("  LAJU DRIFT                = %+.2f count/s", drift);
+    }
 
     const float rawSd = loadCell.rawStdDevCounts();
     const int32_t rawPp = loadCell.rawPeakToPeakCounts();
     if (loadCell.isCalibrated()) {
         const float mgPerCount = 1000.0f / std::fabs(loadCell.countsPerGram());
-        logLine("  noise raw (%u sampel)      = SD %.2f count = %.3f mg, p-p %" PRId32 " count = %.3f mg",
+        logLine("  noise raw (%u sampel, drift dibuang) = SD %.2f count = %.3f mg, p-p %" PRId32 " count = %.3f mg",
                 static_cast<unsigned>(Ads1232::kRawRingSize), rawSd, rawSd * mgPerCount, rawPp,
                 static_cast<float>(rawPp) * mgPerCount);
     } else {
-        logLine("  noise raw (%u sampel)      = SD %.2f count, p-p %" PRId32 " count  (mg: --- UNCALIBRATED)",
+        logLine("  noise raw (%u sampel, drift dibuang) = SD %.2f count, p-p %" PRId32 " count  (mg: --- UNCALIBRATED)",
                 static_cast<unsigned>(Ads1232::kRawRingSize), rawSd, rawPp);
     }
     logLine("  spike ditolak gerbang     = %" PRIu32 " sampel (ambang %.1f sigma)",
             loadCell.spikesRejected(), Ads1232::kSpikeGateSigma);
     if (loadCell.lastShiftDurationUs() > Ads1232::kMaxShiftDurationUs) {
         logLine("  WARNING: shift-out melebihi batas desain, cek beban CPU / interrupt");
+    }
+}
+
+// =====================================================================
+//  Panel diagnostik MAX31865 (perintah 'x')
+//
+//  Setiap bit dicetak terpisah dengan namanya, TERMASUK yang bernilai 0:
+//  justru nilai 0 pada D5/D4/D3 yang sering disalahartikan sebagai "aman",
+//  padahal bit itu hanya di-set oleh fault-detection cycle.
+// =====================================================================
+void printRtdPanel() {
+    if (!rtd.spiOk()) {
+        logLine("MAX31865: SPI tidak merespons, panel tidak berarti");
+        return;
+    }
+
+    // Siklus BARU dijalankan lebih dulu; inilah satu-satunya cara bit
+    // deteksi FORCE-/RTDIN- terputus benar-benar diperbarui.
+    const uint8_t cycleFault = rtd.runFaultDetectionCycle();
+    const uint8_t config = rtd.liveConfigRegister();
+    const uint16_t reg = rtd.rawRegister();
+    const float measured = rtd.ratio();
+
+    logLine("Diagnostik MAX31865:");
+    logLine("  register RTD (raw)  = 0x%04X   (MSB 0x%02X, LSB 0x%02X)", reg,
+            static_cast<unsigned>(reg >> 8), static_cast<unsigned>(reg & 0xFF));
+    logLine("  bit D0 (fault flag) = %u", static_cast<unsigned>(reg & 0x01));
+    logLine("  nilai 15-bit        = %u / 32768", static_cast<unsigned>(rtd.rawCode()));
+    logLine("  rasio terukur       = %.6f   <- besaran yang benar-benar diukur cip", measured);
+    logLine("  resistansi          = %.2f ohm   (RREF di pins.h = %.1f)", rtd.rtdResistance(),
+            RTD_RREF);
+    logLine("  suhu                = %.2f C", rtd.tempC());
+
+    // Rasio tidak bergantung pada RREF. Jadi kalau resistansi probe sudah
+    // diukur multimeter, nilai RREF yang SEHARUSNYA terpasang bisa dihitung.
+    if (measured > 0.0f) {
+        logLine("  --- petunjuk RREF ---");
+        logLine("  rasio = R_probe / R_ref_asli, tidak terpengaruh RTD_RREF.");
+        logLine("  Kalau probe terukur X ohm di multimeter, maka R_ref_asli = X / %.6f:", measured);
+        const float samples[] = {100.0f, 108.0f, 110.0f};
+        for (float probe : samples) {
+            logLine("    probe %.0f ohm  ->  R_ref_asli ~ %.1f ohm", probe, probe / measured);
+        }
+        logLine("  Ukur resistor referensi di board. Kalau BUKAN %.0f ohm, itu penyebabnya,",
+                RTD_RREF);
+        logLine("  dan RTD_RREF di pins.h harus diganti ke nilai terukur itu.");
+    }
+
+    logLine("  config register     = 0x%02X", config);
+    logLine("    D7 VBIAS            = %u", static_cast<unsigned>((config >> 7) & 1));
+    logLine("    D6 conversion mode  = %u (%s)", static_cast<unsigned>((config >> 6) & 1),
+            ((config >> 6) & 1) ? "auto" : "off");
+    logLine("    D5 1-shot           = %u", static_cast<unsigned>((config >> 5) & 1));
+    logLine("    D4 3-wire           = %u (%s)", static_cast<unsigned>((config >> 4) & 1),
+            ((config >> 4) & 1) ? "3-wire" : "2/4-wire");
+    logLine("    D3:D2 fault detect  = %u%u", static_cast<unsigned>((config >> 3) & 1),
+            static_cast<unsigned>((config >> 2) & 1));
+    logLine("    D1 fault clear      = %u", static_cast<unsigned>((config >> 1) & 1));
+    logLine("    D0 filter           = %u (%s Hz)", static_cast<unsigned>(config & 1),
+            (config & 1) ? "50" : "60");
+
+    logLine("  fault (siklus BARU) = 0x%02X", cycleFault);
+    logLine("    D7 RTD High Threshold (RTD/kabel open)  = %u",
+            static_cast<unsigned>((cycleFault >> 7) & 1));
+    logLine("    D6 RTD Low Threshold (RTD short)        = %u",
+            static_cast<unsigned>((cycleFault >> 6) & 1));
+    logLine("    D5 REFIN- > 0.85 x VBIAS                = %u",
+            static_cast<unsigned>((cycleFault >> 5) & 1));
+    logLine("    D4 REFIN- < 0.85 x VBIAS (FORCE- open)  = %u",
+            static_cast<unsigned>((cycleFault >> 4) & 1));
+    logLine("    D3 RTDIN- < 0.85 x VBIAS (FORCE- open)  = %u",
+            static_cast<unsigned>((cycleFault >> 3) & 1));
+    logLine("    D2 Over/under voltage                   = %u",
+            static_cast<unsigned>((cycleFault >> 2) & 1));
+    logLine("  ambang fault        : low = %.2f ohm, high = %.2f ohm", rtd.thresholdLowOhm(),
+            rtd.thresholdHighOhm());
+    logLine("  initFault (boot)    = 0x%02X", rtd.initFault());
+
+    if (cycleFault != 0) {
+        Serial.print("# !! SIKLUS FAULT BARU TIDAK BERSIH: ");
+        RtdSensor::printFault(Serial, cycleFault);
+        Serial.println();
+        logLine("  !! Perbaiki pengawatan dulu; nilai resistansi di atas tidak bisa dipercaya.");
+    } else {
+        logLine("  Siklus fault bersih: RTD, REFIN-, dan RTDIN- tersambung.");
+        logLine("  Berarti error bukan kabel terputus, melainkan NILAI referensi.");
     }
 }
 
@@ -215,7 +322,9 @@ void reportRtdHealth(bool ok) {
     // Resistansi mentah selalu dicetak supaya salah RREF/jumper terlihat
     logLine("  RTD awal : R=%.2f ohm (kode %u/32768), T=%.2f C, fault 0x%02X",
             rtd.rtdResistance(), static_cast<unsigned>(rtd.rawCode()), rtd.tempC(), rtd.fault());
-    if (rtd.valid()) {
+    // Tanpa syarat valid(): valid() mensyaratkan fault == 0, sehingga nilai
+    // yang jelas tidak wajar justru lolos tanpa peringatan.
+    if (rtd.spiOk()) {
         checkRtdPlausibility();
     }
 }
@@ -380,6 +489,66 @@ void reportAdsTimeout() {
         logLine("ADS1232 kembali mengirim data");
     }
     adsTimeoutReported = timedOut;
+}
+
+// =====================================================================
+//  Initial zero setting — tare otomatis saat alat nyala, seperti timbangan
+// =====================================================================
+void serviceAutoTare() {
+    if (!autoTarePending) {
+        return;
+    }
+    if (loadCell.health() != Ads1232::Health::Ok || loadCell.drdyTimedOut()) {
+        autoTarePending = false;  // tidak ada data; biarkan user tare manual
+        return;
+    }
+    if (loadCell.isSettling() || loadCell.isBusy() || std::isnan(loadCell.filteredCounts())) {
+        return;  // tunggu data valid mengalir
+    }
+
+    // Pengaman: bandingkan dengan offset tersimpan. Tanpa offset tersimpan
+    // (boot pertama) tidak ada acuan, jadi tare langsung dijalankan.
+    if (loadCell.hasStoredOffset()) {
+        const float countsPerGram = std::fabs(loadCell.countsPerGram());
+        const double deviation =
+            std::fabs(static_cast<double>(loadCell.filteredCounts()) - loadCell.offsetCounts());
+        if (deviation > static_cast<double>(app::kInitialZeroRangeGrams * countsPerGram)) {
+            logLine("Tare otomatis DIBATALKAN: ada ~%.1f g di timbangan saat nyala (batas %.0f g)",
+                    deviation / countsPerGram, app::kInitialZeroRangeGrams);
+            logLine("  Kosongkan timbangan lalu jalankan 't'. Offset lama tetap dipakai.");
+            autoTarePending = false;
+            return;
+        }
+    }
+
+    loadCell.tare();
+    autoTarePending = false;
+    logLine("Initial zero setting: tare otomatis saat nyala (%u sampel, ~%.1f s)",
+            static_cast<unsigned>(Ads1232::kTareSamples),
+            samplesToSeconds(Ads1232::kTareSamples));
+    logLine("  Timbangan HARUS kosong sekarang. Kalau ada beban, ia akan ikut dinolkan.");
+}
+
+// Pemberitahuan sekali saja: drift sudah turun, inilah saat terbaik tare ulang.
+// Sengaja TIDAK tare otomatis — kalau sampel sudah di timbangan, tare akan
+// menolkannya.
+void serviceSettledNotice() {
+    if (settledReported || autoTarePending || !loadCell.isCalibrated()) {
+        return;
+    }
+    const float drift = loadCell.driftCountsPerSecond();
+    if (std::isnan(drift)) {
+        return;
+    }
+    const float mgPerMin = std::fabs(drift) * 60.0f * 1000.0f / std::fabs(loadCell.countsPerGram());
+    if (mgPerMin > app::kSettledDriftMgPerMin) {
+        return;
+    }
+    settledReported = true;
+    logLine("SUDAH SETIMBANG: drift turun ke %.2f mg/menit (ambang %.0f).", mgPerMin,
+            app::kSettledDriftMgPerMin);
+    logLine("  Inilah saat terbaik menjalankan 't' lagi. Tare saat baru nyala selalu");
+    logLine("  meleset karena pemanasan sendiri belum selesai.");
 }
 
 void latchButtonEvent() {
@@ -650,6 +819,9 @@ void handleCommand(char* line) {
             printCalibration();
             printAdsDiagnostics();
             break;
+        case 'x':
+            printRtdPanel();
+            break;
         case '?':
             printHelp();
             break;
@@ -709,9 +881,19 @@ void loop() {
 
     pollSerialCommands();
 
+    serviceAutoTare();
+    serviceSettledNotice();
     reportLoadCellEvents();
     reportRtdFaults();
     reportAdsTimeout();
+
+    // Plausibility check berkala: nilai di luar rentang wajar bisa muncul
+    // belakangan, bukan hanya saat boot.
+    const uint32_t nowMs = millis();
+    if (rtd.spiOk() && (nowMs - lastRtdCheckMs) >= app::kRtdPlausibleCheckMs) {
+        lastRtdCheckMs = nowMs;
+        checkRtdPlausibility();
+    }
 
     serviceReport();
 }

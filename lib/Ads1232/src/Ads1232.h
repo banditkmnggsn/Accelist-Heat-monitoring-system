@@ -98,9 +98,19 @@ public:
     //  sebagai pengganti saat sampel dinilai spike (lihat processSample).
     // -----------------------------------------------------------------
     static constexpr uint8_t kMedianSize = 5;
-    static constexpr uint8_t kAverageSize = 16;
     static constexpr uint8_t kRawRingSize = 64;  // dasar noise raw & gerbang spike
     static constexpr float kSpikeGateSigma = 6.0f;
+
+    // Rata-rata adaptif. Noise turun sebagai akar jumlah sampel, jadi window
+    // panjang sangat menolong: pada SD raw 29.9 count, 16 sampel memberi
+    // 1.37 mg sementara 128 sampel memberi 0.49 mg.
+    //
+    // Window dimulai pendek lalu tumbuh 1 sampel per konversi sampai maksimum,
+    // dan dipendekkan kembali begitu terdeteksi perubahan beban nyata, supaya
+    // respons tetap cepat saat beban berubah tetapi tenang saat diam.
+    static constexpr uint8_t kAverageMin = 16;
+    static constexpr uint8_t kAverageMax = 128;
+    static constexpr float kStepSigma = 6.0f;  // ambang "beban benar-benar berubah"
 
     // Deteksi stabil mengukur PERGERAKAN ANGKA YANG TAMPIL, yaitu rentang
     // (maks-min) keluaran moving average selama kStableWindow sampel.
@@ -112,6 +122,10 @@ public:
     static constexpr uint8_t kStableWindow = 32;      // 3.2 s @10 SPS
     static constexpr float kStableSpanMg = 5.0f;
     static constexpr float kStableSpanCounts = 30.0f;  // dipakai saat belum terkalibrasi
+    // Sekali STABLE, butuh pergerakan 1.5x ambang untuk keluar lagi. Tanpa
+    // histeresis ini status berkedip terus-menerus ketika creep nyata membuat
+    // pergerakan duduk tepat di ambang.
+    static constexpr float kStableExitFactor = 1.5f;
 
     // -----------------------------------------------------------------
     //  Tare & kalibrasi
@@ -183,6 +197,11 @@ public:
     float stdDevCounts() const;    // NAN sampai window moving average penuh
     // Rentang pergerakan angka yang tampil; inilah yang dipakai isStable().
     float stableSpanCounts() const;     // NAN sampai window stabil penuh
+    // Laju drift dari kemiringan keluaran. Inilah angka yang menunjukkan
+    // apakah sistem sudah mencapai kesetimbangan termal — bukan isStable(),
+    // yang hanya melihat sebaran sesaat.
+    float driftCountsPerSecond() const;
+    uint8_t averageWindow() const;      // panjang window adaptif saat ini
     float rawStdDevCounts() const;      // noise sebenarnya, sebelum filter
     int32_t rawPeakToPeakCounts() const;
     uint32_t spikesRejected() const;
@@ -205,6 +224,7 @@ private:
     bool shiftOut(uint8_t pulses, uint32_t& code);
     void processSample(int32_t value);
     void updateRawStats(int32_t value);
+    double meanOfLast(uint8_t count) const;
     void resetFilters();
     int32_t medianOfWindow() const;
     bool canStartJob() const;
@@ -245,18 +265,24 @@ private:
     int32_t medianBuf_[kMedianSize] = {};
     uint8_t medianIdx_ = 0;
     uint8_t medianCount_ = 0;
-    int32_t avgBuf_[kAverageSize] = {};
+    int32_t avgBuf_[kAverageMax] = {};
     uint8_t avgIdx_ = 0;
-    uint8_t avgCount_ = 0;
-    int64_t avgSum_ = 0;
-    double filtered_ = NAN;
+    uint8_t avgFill_ = 0;
+    uint8_t avgWindow_ = kAverageMin;
+    double filtered_ = NAN;        // rata-rata adaptif, dipakai grams()
+    double stabilityValue_ = NAN;  // rata-rata kAverageMin tetap, dipakai isStable()
     float stdDev_ = NAN;
     int32_t rawRing_[kRawRingSize] = {};
     uint8_t rawIdx_ = 0;
     uint8_t rawCount_ = 0;
     float rawStdDev_ = NAN;
+    // Estimasi noise "tenang", hanya diperbarui saat beban tidak berubah.
+    // rawStdDev_ tidak bisa dipakai untuk deteksi step karena step itu sendiri
+    // melonjakkan SD-nya, sehingga ambang jadi lebih besar dari step-nya.
+    float quietStdDev_ = NAN;
     int32_t rawPeakToPeak_ = 0;
     uint32_t spikesRejected_ = 0;
+    bool stableLatched_ = false;
     double stableRing_[kStableWindow] = {};
     uint8_t stableIdx_ = 0;
     uint8_t stableCount_ = 0;

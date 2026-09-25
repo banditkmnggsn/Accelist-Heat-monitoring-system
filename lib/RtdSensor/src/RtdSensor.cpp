@@ -112,6 +112,7 @@ void RtdSensor::readSample() {
     uint8_t buffer[2] = {0, 0};
     readRegisters(MAX31865_RTDMSB_REG, buffer, sizeof(buffer));
     const uint16_t reg = static_cast<uint16_t>((buffer[0] << 8) | buffer[1]);
+    rawRegister_ = reg;
     rawCode_ = static_cast<uint16_t>(reg >> 1);  // D0 = flag fault
 
     resistance_ = (static_cast<float>(rawCode_) / kAdcFullScale) * cfg_.rrefOhm;
@@ -133,6 +134,32 @@ void RtdSensor::readSample() {
         // terdeteksi di sampel berikutnya (status bit di chip latched).
         max_.clearFault();
     }
+}
+
+// Urutan sama seperti di begin(), tetapi dapat dipanggil kapan saja.
+// Siklus ini mematikan auto-conversion (7.x MAX31865), karena itu bias dan
+// auto-convert dinyalakan ulang dan sampel berikutnya diberi jeda settling.
+uint8_t RtdSensor::runFaultDetectionCycle() {
+    if (!spiOk_) {
+        return 0;
+    }
+    max_.readFault(MAX31865_FAULT_AUTO);
+    const uint32_t cycleStartMs = millis();
+    while ((readConfig() & kFaultCycleMask) != 0 &&
+           (millis() - cycleStartMs) < kFaultCycleTimeoutMs) {
+        // bit D3:D2 kembali 00 saat cycle selesai
+    }
+    const uint8_t result = max_.readFault(MAX31865_FAULT_NONE);
+    max_.clearFault();
+
+    max_.enableBias(true);
+    max_.autoConvert(true);
+    config_ = readConfig();
+
+    reportedFault_ = 0;  // status chip sudah di-clear, laporan lama tidak berlaku
+    lastSampleMs_ = millis();
+    waitMs_ = kStartupSettleMs;
+    return result;
 }
 
 bool RtdSensor::takeFaultReport(uint8_t& faultCode) {
@@ -207,4 +234,9 @@ bool RtdSensor::valid() const { return spiOk_ && sampleCount_ > 0 && fault_ == 0
 bool RtdSensor::spiOk() const { return spiOk_; }
 uint8_t RtdSensor::initFault() const { return initFault_; }
 uint8_t RtdSensor::configRegister() const { return config_; }
+uint8_t RtdSensor::liveConfigRegister() { return readConfig(); }
 uint16_t RtdSensor::rawCode() const { return rawCode_; }
+uint16_t RtdSensor::rawRegister() const { return rawRegister_; }
+float RtdSensor::ratio() const { return static_cast<float>(rawCode_) / kAdcFullScale; }
+float RtdSensor::thresholdLowOhm() const { return kFaultLowRatio * cfg_.rnominalOhm; }
+float RtdSensor::thresholdHighOhm() const { return kFaultHighRatio * cfg_.rnominalOhm; }

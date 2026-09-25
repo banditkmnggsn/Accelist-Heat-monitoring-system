@@ -43,4 +43,32 @@ constexpr float kRtdPlausibleMaxOhm = 200.0f;
 constexpr float kRtdPlausibleMinC   = -50.0f;
 constexpr float kRtdPlausibleMaxC   = 250.0f;
 
+// Ulangi plausibility check berkala, bukan hanya saat boot: nilai bisa
+// melenceng setelah chamber panas atau sambungan melemah.
+constexpr uint32_t kRtdPlausibleCheckMs = 60000;
+
+// ---------------------------------------------------------------------
+//  Initial zero setting: tare otomatis saat alat nyala, seperti timbangan.
+//
+//  Batas pengaman mengikuti praktik OIML R76 (initial zero-setting range
+//  10 % kapasitas): kalau raw saat nyala menyimpang lebih dari ini dari
+//  offset yang tersimpan, artinya ada beban di timbangan dan tare
+//  otomatis DIBATALKAN supaya beban itu tidak ikut dinolkan.
+//
+//  Pengaman ini hanya menangkap kasus kasar. Beban kecil yang tertinggal
+//  tetap akan ikut dinolkan — sama seperti timbangan mana pun.
+// ---------------------------------------------------------------------
+constexpr float kInitialZeroRangeGrams = 30.0f;  // 10 % dari kapasitas 300 g
+
+// ---------------------------------------------------------------------
+//  Ambang "sudah setimbang". Drift monotonik setelah alat nyala berasal
+//  dari pemanasan sendiri dan EMF termoelektrik, bukan noise, sehingga
+//  hanya bisa ditunggu — tidak bisa difilter.
+//
+//  Firmware TIDAK tare ulang otomatis saat ambang ini tercapai: kalau
+//  sampel sudah di timbangan, tare akan menolkannya. Yang dilakukan hanya
+//  memberi tahu bahwa inilah saat terbaik untuk tare ulang.
+// ---------------------------------------------------------------------
+constexpr float kSettledDriftMgPerMin = 3.0f;
+
 }  // namespace app

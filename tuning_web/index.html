@@ -53,6 +53,14 @@
     th:first-child, td:first-child { text-align: left; }
     td.warn { color: var(--bad); }
     .kv { color: var(--accent); }
+    .raw { display: block; margin-top: 2px; font-size: 12px; opacity: 0.75; }
+    .dispbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: -12px 0 24px;
+               padding: 10px 14px; border: 1px solid var(--line);
+               background: color-mix(in srgb, var(--panel) 92%, transparent);
+               color: var(--muted); font: 13px ui-monospace, monospace; }
+    .dispbar input[type=number] { width: 66px; background: #131c24; border: 1px solid var(--line);
+                                  color: var(--text); padding: 3px 6px; font: 13px ui-monospace, monospace; }
+    .dispbar label { display: flex; gap: 6px; align-items: center; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
     @media (max-width: 700px) { header { align-items: start; flex-direction: column; } .connection { text-align: left; } .grid { grid-template-columns: repeat(2, 1fr); } }
   </style>
@@ -66,16 +74,22 @@
     <section class="grid">
       <div class="metric"><label>Suhu PT100</label><span id="temp" class="value">--</span><span class="unit">&deg;C</span></div>
       <div class="metric"><label>Resistansi RTD</label><span id="ohm" class="value">--</span><span class="unit">ohm</span></div>
-      <div class="metric"><label>Berat</label><span id="grams" class="value">--</span><span class="unit">gram</span></div>
+      <div class="metric"><label>Berat</label><span id="grams" class="value">--</span><span class="unit">gram <span id="gramsTrue" class="raw"></span></span></div>
       <div class="metric"><label>Status ADS1232</label><span id="status" class="value">--</span><span class="unit">raw <span id="raw">--</span></span></div>
     </section>
+    <div class="dispbar">
+      <label><input type="checkbox" id="calmOn" checked> tampilan tenang</label>
+      <label>dead band <input type="number" id="deadband" value="3" min="0" max="500" step="1"> mg</label>
+      <label>abaikan gerak &lt; <input type="number" id="stick" value="2" min="0" max="500" step="1"> mg</label>
+      <span>hanya mempengaruhi angka besar di atas &mdash; log, CSV, dan kalibrasi tetap memakai nilai asli</span>
+    </div>
     <section class="layout">
       <div class="panel">
         <h2>Kontrol tuning</h2>
         <div class="actions">
           <button data-command="t">Tare</button><button data-command="z">Self-cal</button>
           <button data-command="r">Reset ADS</button><button data-command="p">Diagnostik</button>
-          <button data-command="?">Bantuan</button><button data-command="e">Reset encoder</button>
+          <button data-command="x">Diagnosa RTD</button><button data-command="e">Reset encoder</button>
         </div>
         <div class="logbar" style="margin-top:10px">
           <input id="calGrams" type="search" placeholder="gram anak timbangan" value="10">
@@ -184,6 +198,37 @@
         (frozen ? ` &nbsp;<span class="held">BEKU &mdash; ${buffer.length - frozenLen} baris baru tertahan</span>` : '');
     }
 
+    // Tampilan tenang. MURNI KOSMETIK: hanya angka besar di atas yang dihaluskan.
+    // Log, CSV, kalibrasi, dan analisis tetap memakai nilai asli, supaya tidak ada
+    // data terukur yang hilang.
+    //
+    // Dua mekanisme:
+    //   dead band  -> |nilai| di bawah ambang ditampilkan 0,000 (dengan histeresis
+    //                 1,5x saat keluar, supaya tidak berkedip di tepi ambang)
+    //   sticky     -> angka hanya diperbarui kalau bergeser lebih dari `stick`,
+    //                 sehingga digit terakhir tidak bergetar karena noise
+    //
+    // Ini TIDAK menggeser offset tare (zero tracking). Zero tracking sengaja tidak
+    // dibuat: ia tidak bisa membedakan drift lambat dari kehilangan massa lambat,
+    // dan pada kurva pengeringan ia akan memakan sinyal yang justru diukur.
+    let shownGrams = null;
+
+    function calmGrams(trueGrams) {
+      if (trueGrams === null) { shownGrams = null; return '--'; }
+      if (!el('calmOn').checked) { shownGrams = trueGrams; return trueGrams.toFixed(3); }
+
+      const deadband = Number(el('deadband').value) / 1000;
+      const stick = Number(el('stick').value) / 1000;
+      const exitAt = shownGrams === 0 ? deadband * 1.5 : deadband;
+
+      if (Math.abs(trueGrams) < exitAt) {
+        shownGrams = 0;
+      } else if (shownGrams === null || Math.abs(trueGrams - shownGrams) > stick) {
+        shownGrams = trueGrams;
+      }
+      return shownGrams.toFixed(3);
+    }
+
     async function refresh() {
       try {
         const state = await fetch(`/api/state?since=${nextSeq}`, { cache: 'no-store' }).then(r => r.json());
@@ -194,7 +239,8 @@
         if (d) {
           el('temp').textContent = d.tempC.toFixed(2);
           el('ohm').textContent = d.rtdOhm.toFixed(2);
-          el('grams').textContent = d.grams === null ? '--' : d.grams.toFixed(3);
+          el('grams').textContent = calmGrams(d.grams);
+          el('gramsTrue').textContent = d.grams === null ? '' : `asli ${d.grams.toFixed(3)}`;
           el('status').textContent = d.status;
           el('raw').textContent = d.rawCounts;
           el('details').textContent = `RTD fault 0x${d.rtdFault.toString(16).padStart(2, '0').toUpperCase()} | encoder ${d.encoder} | tombol ${d.button} | uptime ${d.seconds.toFixed(1)} s`;
