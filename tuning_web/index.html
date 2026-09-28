@@ -3,42 +3,99 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Heat Box Tuning</title>
+  <title>Heat Box</title>
   <style>
-    :root { color-scheme: dark; --bg: #111820; --panel: #1a2530; --line: #30404e; --text: #e9f0f4; --muted: #9eb0bb; --accent: #f0b35b; --ok: #63d09b; --bad: #ef7777; }
+    :root {
+      color-scheme: dark;
+      --bg: #111820; --panel: #1a2530; --line: #30404e; --text: #e9f0f4; --muted: #9eb0bb;
+      --accent: #f0b35b; --ok: #63d09b; --bad: #ef7777;
+      /* grafik: palet kategorikal tervalidasi pada permukaan #1a2530 (lihat CATATAN) */
+      --series-measured: #3987e5; --series-monotone: #d95926; --series-model: #199e70;
+      --status-critical: #d03b3b; --grid: #26333f; --axis: #3a4b5a;
+    }
     * { box-sizing: border-box; }
     body { margin: 0; background: radial-gradient(circle at 85% 0%, #263b45 0, var(--bg) 38%); color: var(--text); font: 16px/1.4 Georgia, serif; }
     main { width: min(1280px, 100%); margin: 0 auto; padding: 32px 20px 48px; }
     header { display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 20px; }
     h1 { margin: 0; font-size: clamp(2rem, 6vw, 4rem); font-weight: 400; letter-spacing: 0; }
-    .eyebrow { color: var(--accent); font: 700 12px/1.2 ui-monospace, monospace; letter-spacing: 0; text-transform: uppercase; }
+    h2 { margin: 0 0 14px; font-size: 1.2rem; font-weight: 400; }
+    h3 { margin: 0 0 8px; font-size: 1rem; font-weight: 400; color: var(--muted); }
+    .eyebrow { color: var(--accent); font: 700 12px/1.2 ui-monospace, monospace; text-transform: uppercase; }
     .connection { color: var(--muted); text-align: right; font: 13px ui-monospace, monospace; }
     .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); margin-right: 6px; }
     .dot.ok { background: var(--ok); }
-    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0 12px; }
     .metric, .panel { background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); }
-    .metric { min-height: 132px; padding: 18px; }
-    .metric label { display: block; color: var(--muted); font: 12px ui-monospace, monospace; text-transform: uppercase; }
-    .value { display: block; margin-top: 16px; color: var(--accent); font-size: clamp(1.7rem, 4vw, 2.6rem); }
+    .metric { min-height: 124px; padding: 18px; }
+    .metric label, .stat label { display: block; color: var(--muted); font: 12px ui-monospace, monospace; text-transform: uppercase; }
+    .value { display: block; margin-top: 14px; color: var(--accent); font-size: clamp(1.7rem, 4vw, 2.6rem); }
     .unit { color: var(--muted); font-size: 14px; }
-    .layout { display: grid; grid-template-columns: 330px 1fr; gap: 12px; align-items: start; }
-    .panel { padding: 18px; }
-    h2 { margin: 0 0 14px; font-size: 1.2rem; font-weight: 400; }
+    .raw { display: block; margin-top: 2px; font-size: 12px; opacity: 0.75; }
+    .panel { padding: 18px; margin-top: 12px; }
     .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-    .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-    button { min-height: 42px; border: 1px solid #6d5938; background: #2d291f; color: var(--text); cursor: pointer; font: 14px ui-monospace, monospace; }
-    button:hover { background: #4a3b24; }
+    button { min-height: 40px; padding: 0 16px; border: 1px solid #6d5938; background: #2d291f; color: var(--text); cursor: pointer; font: 14px ui-monospace, monospace; }
+    button:hover:not(:disabled) { background: #4a3b24; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    button.primary { border-color: var(--accent); background: #5a4527; }
+    button.danger { border-color: #7a3a3a; background: #2c1d1f; }
+    .status { color: var(--muted); font: 13px ui-monospace, monospace; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input[type=search], input[type=number], select { background: #131c24; border: 1px solid var(--line); color: var(--text); padding: 6px 8px; font: 13px ui-monospace, monospace; }
+    input[type=search] { flex: 1 1 180px; min-width: 140px; }
+    input:focus, select:focus { outline: 1px solid var(--accent); }
+
+    /* ---- siklus ---- */
+    .stepper { display: flex; gap: 0; margin: 4px 0 16px; padding: 0; list-style: none; flex-wrap: wrap; }
+    .stepper li { flex: 1 1 120px; padding: 8px 10px; border-top: 3px solid var(--line); color: var(--muted); font: 12px ui-monospace, monospace; }
+    .stepper li.done { border-color: #4f6a55; color: #9fc3a8; }
+    .stepper li.now { border-color: var(--accent); color: var(--text); }
+    .message { font-size: 1.05rem; margin: 0 0 12px; }
+    .notes { list-style: none; margin: 0 0 12px; padding: 0; }
+    .notes li { padding: 6px 10px; margin-bottom: 4px; border-left: 3px solid var(--status-critical); background: #2a1c1f; font: 13px ui-monospace, monospace; }
+    .notes li::before { content: "\26A0  "; }
+    .notes.soft li { border-left-color: var(--accent); background: #2a2519; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 14px 0; }
+    .stat { border: 1px solid var(--line); padding: 10px 12px; }
+    .stat .v { display: block; margin-top: 6px; font-size: 1.35rem; }
+    .stat .s { display: block; color: var(--muted); font: 12px ui-monospace, monospace; }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+    .chart-card { position: relative; border: 1px solid var(--line); padding: 12px 12px 6px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; font: 12px ui-monospace, monospace; color: var(--muted); }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend svg { flex: none; }
+    .chart-svg { display: block; width: 100%; height: 260px; outline: none; }
+    .chart-svg:focus-visible { outline: 1px solid var(--accent); }
+    .tip { position: absolute; pointer-events: none; min-width: 170px; padding: 8px 10px; background: #0e151b; border: 1px solid var(--line); font: 12px ui-monospace, monospace; display: none; z-index: 2; }
+    .tip .t { color: var(--muted); margin-bottom: 4px; }
+    .tip .r { display: flex; align-items: center; gap: 6px; }
+    .tip .r b { color: var(--text); font-weight: 700; }
+    .tip .r i { display: inline-block; width: 12px; height: 2px; }
+    .empty { display: grid; place-items: center; height: 260px; color: var(--muted); font: 13px ui-monospace, monospace; text-align: center; padding: 0 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; font: 12px ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    th, td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: right; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 400; }
+    th:first-child, td:first-child { text-align: left; }
+    td.warn { color: var(--bad); }
+    details > summary { cursor: pointer; color: var(--muted); font: 13px ui-monospace, monospace; margin-top: 12px; }
+    .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px 16px; margin-top: 10px; }
+    .settings label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font: 12px ui-monospace, monospace; color: var(--muted); }
+    .settings input { width: 90px; }
+
+    /* ---- log ---- */
     .logbar { display: flex; gap: 8px; align-items: stretch; margin-bottom: 10px; flex-wrap: wrap; }
     .logbar button { min-height: 34px; padding: 0 14px; }
     .logbar button.frozen { border-color: var(--bad); background: #3a2224; color: #ffd2d2; }
-    input[type=search] { flex: 1 1 180px; min-width: 140px; background: #131c24; border: 1px solid var(--line); color: var(--text); padding: 0 10px; font: 13px ui-monospace, monospace; }
-    input[type=search]:focus { outline: 1px solid var(--accent); }
-    pre { height: 520px; overflow: auto; margin: 0; color: #b9c8cf; white-space: pre; font: 12px/1.5 ui-monospace, monospace; }
+    pre { height: 340px; overflow: auto; margin: 0; color: #b9c8cf; white-space: pre; font: 12px/1.5 ui-monospace, monospace; }
     pre.frozen { border-left: 3px solid var(--bad); padding-left: 9px; }
-    .status { color: var(--muted); font: 13px ui-monospace, monospace; }
-    .logmeta { margin: 8px 0 0; }
     .held { color: var(--accent); }
-    .calpanel { margin-top: 12px; }
+
+    /* ---- perawatan ---- */
+    details.maint { margin-top: 12px; }
+    details.maint > summary { font-size: 14px; padding: 14px 18px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 92%, transparent); margin: 0; }
+    details.maint[open] > summary { border-bottom: none; }
+    .maint-body { border: 1px solid var(--line); border-top: none; padding: 4px 18px 18px; background: color-mix(in srgb, var(--panel) 70%, transparent); }
+    .maint-body .panel { background: transparent; }
+    .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
     .steps { margin: 0; padding-left: 22px; }
     .steps li { margin-bottom: 14px; }
     .steps button { min-height: 34px; padding: 0 14px; vertical-align: middle; }
@@ -47,121 +104,205 @@
     .weights button { min-height: 34px; padding: 0 12px; }
     .weights button.picked { border-color: var(--accent); background: #5a4527; color: #fff; }
     .weights button.weak { opacity: 0.55; }
-    table { border-collapse: collapse; width: 100%; margin-top: 12px; font: 12px ui-monospace, monospace; }
-    th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: right; white-space: nowrap; }
-    th { color: var(--muted); font-weight: 400; text-align: right; }
-    th:first-child, td:first-child { text-align: left; }
-    td.warn { color: var(--bad); }
     .kv { color: var(--accent); }
-    .raw { display: block; margin-top: 2px; font-size: 12px; opacity: 0.75; }
-    .dispbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: -12px 0 24px;
-               padding: 10px 14px; border: 1px solid var(--line);
-               background: color-mix(in srgb, var(--panel) 92%, transparent);
-               color: var(--muted); font: 13px ui-monospace, monospace; }
-    .dispbar input[type=number] { width: 66px; background: #131c24; border: 1px solid var(--line);
-                                  color: var(--text); padding: 3px 6px; font: 13px ui-monospace, monospace; }
+    .dispbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; color: var(--muted); font: 13px ui-monospace, monospace; }
+    .dispbar input[type=number] { width: 66px; }
     .dispbar label { display: flex; gap: 6px; align-items: center; }
-    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+    @media (max-width: 960px) { .charts { grid-template-columns: 1fr; } }
     @media (max-width: 700px) { header { align-items: start; flex-direction: column; } .connection { text-align: left; } .grid { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <div><div class="eyebrow">Temporary instrument panel</div><h1>Heat Box<br>tuning</h1></div>
+      <div><div class="eyebrow">Moisture analyzer &mdash; tahap breadboard</div><h1>Heat Box</h1></div>
       <div class="connection"><span id="dot" class="dot"></span><span id="connection">menunggu serial</span><br><span id="port">-- @ 115200</span></div>
     </header>
+
     <section class="grid">
-      <div class="metric"><label>Suhu PT100</label><span id="temp" class="value">--</span><span class="unit">&deg;C</span></div>
-      <div class="metric"><label>Resistansi RTD</label><span id="ohm" class="value">--</span><span class="unit">ohm</span></div>
+      <div class="metric"><label>Suhu PT100</label><span id="temp" class="value">--</span><span class="unit">&deg;C <span id="ohm" class="raw"></span></span></div>
       <div class="metric"><label>Berat</label><span id="grams" class="value">--</span><span class="unit">gram <span id="gramsTrue" class="raw"></span></span></div>
+      <div class="metric"><label>Laju penyusutan</label><span id="rateTile" class="value">--</span><span class="unit">mg/menit <span id="rateTileSub" class="raw">di luar siklus</span></span></div>
       <div class="metric"><label>Status ADS1232</label><span id="status" class="value">--</span><span class="unit">raw <span id="raw">--</span></span></div>
     </section>
-    <div class="dispbar">
-      <label><input type="checkbox" id="calmOn" checked> tampilan tenang</label>
-      <label>dead band <input type="number" id="deadband" value="3" min="0" max="500" step="1"> mg</label>
-      <label>abaikan gerak &lt; <input type="number" id="stick" value="2" min="0" max="500" step="1"> mg</label>
-      <span>hanya mempengaruhi angka besar di atas &mdash; log, CSV, dan kalibrasi tetap memakai nilai asli</span>
-    </div>
-    <section class="layout">
-      <div class="panel">
-        <h2>Kontrol tuning</h2>
-        <div class="actions">
-          <button data-command="t">Tare</button><button data-command="z">Self-cal</button>
-          <button data-command="r">Reset ADS</button><button data-command="p">Diagnostik</button>
-          <button data-command="x">Diagnosa RTD</button><button data-command="e">Reset encoder</button>
-        </div>
-        <div class="logbar" style="margin-top:10px">
-          <input id="calGrams" type="search" placeholder="gram anak timbangan" value="10">
-          <button id="calBtn">Kalibrasi</button>
-        </div>
-        <p class="status" id="details">Belum ada report sensor.</p>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Serial terakhir</h2></div>
-        <div class="logbar">
-          <button id="freeze">Bekukan</button>
-          <button id="clear">Bersihkan</button>
-          <button id="download">Unduh</button>
-          <input id="filter" type="search" placeholder="filter teks, mis. CALPT atau raw 1127">
-        </div>
-        <pre id="log">Menunggu data...</pre>
-        <p class="status logmeta" id="logmeta">0 baris</p>
-      </div>
-    </section>
 
-    <section class="panel calpanel">
+    <!-- ================= SIKLUS SAMPEL ================= -->
+    <section class="panel" id="cyclePanel">
       <div class="panel-head">
-        <h2>Kalibrasi multi-titik</h2>
-        <span class="status" id="calState">nol belum direkam</span>
+        <h2>Siklus sampel</h2>
+        <span class="status" id="cycleId"></span>
       </div>
-
-      <ol class="steps">
-        <li>
-          <b>Kosongkan timbangan</b>, lalu <button id="calZero">Rekam NOL</button>
-          <span class="status">tiap titik dikoreksi dengan nol sebelum &amp; sesudahnya, itu yang membatalkan drift</span>
-        </li>
-        <li>
-          <b>Pilih beban</b> yang akan diletakkan:
-          <div class="weights" id="weights"></div>
-          <div class="logbar" style="margin-top:8px">
-            <input id="calManual" type="search" placeholder="atau ketik sendiri, dalam mg">
-            <label class="status"><input type="radio" name="dir" value="U" checked> naik</label>
-            <label class="status"><input type="radio" name="dir" value="D"> turun</label>
-          </div>
-        </li>
-        <li>
-          <b>Letakkan bebannya</b>, tunggu diam, lalu
-          <button id="calPoint" disabled>Beban sudah diletakkan</button>
-          <span class="status">merekam 64 sampel (~6,4 detik)</span>
-        </li>
-        <li><b>Angkat beban</b> dan tekan <b>Rekam NOL</b> lagi, lalu ulangi untuk beban berikutnya.</li>
+      <ol class="stepper" id="stepper">
+        <li data-step="prepare">1 &middot; Tare wadah</li>
+        <li data-step="load">2 &middot; Isi sampel</li>
+        <li data-step="heating">3 &middot; Pemanasan</li>
+        <li data-step="cutoff">4 &middot; Cut-off &amp; prediksi</li>
+        <li data-step="done">5 &middot; Selesai</li>
       </ol>
+      <p class="message" id="cycleMessage">Memuat...</p>
+      <p class="status" id="readiness"></p>
+      <ul class="notes" id="cycleWarnings"></ul>
+      <div class="row" id="cycleButtons"></div>
+      <p class="status" id="cycleFeedback"></p>
 
-      <div class="logbar" style="margin-top:14px">
-        <button id="calApply" disabled>Terapkan ke firmware</button>
-        <button id="calCsv">Unduh CSV</button>
-        <button id="calClear">Hapus semua titik</button>
+      <div class="stats" id="cycleStats"></div>
+
+      <div class="charts">
+        <div class="chart-card">
+          <h3>Berat sampel per menit</h3>
+          <div class="legend" id="legendMass"></div>
+          <div id="chartMass"></div>
+          <div class="tip" id="tipMass"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Laju penyusutan (skala log)</h3>
+          <div class="legend" id="legendRate"></div>
+          <div id="chartRate"></div>
+          <div class="tip" id="tipRate"></div>
+        </div>
       </div>
 
-      <div id="calFit" class="status" style="margin-top:14px">Belum ada titik.</div>
-      <div style="overflow:auto"><table id="calTable"></table></div>
-      <details id="calReportBox" style="margin-top:14px" hidden>
-        <summary class="status" style="cursor:pointer">Ringkasan siap tempel ke laporan</summary>
-        <pre id="calReport" style="height:auto;max-height:320px;margin-top:8px"></pre>
+      <ul class="notes soft" id="cycleConfidence"></ul>
+
+      <details id="minuteTableBox">
+        <summary>Tabel per menit (semua nilai yang ada di grafik)</summary>
+        <div style="overflow:auto"><table id="minuteTable"></table></div>
+      </details>
+      <details>
+        <summary>Berkas data siklus</summary>
+        <p class="status" id="cycleFiles">Belum ada siklus.</p>
+      </details>
+      <details id="settingsBox">
+        <summary>Pengaturan siklus</summary>
+        <div class="settings" id="settingsForm">
+          <label>ambang cut-off load cell (mg/menit) <input type="number" step="any" data-key="cutoff_rate_mg_min"></label>
+          <label>target berhenti (mg/menit) <input type="number" step="any" data-key="target_rate_mg_min"></label>
+          <label>jendela laju (menit) <input type="number" step="1" data-key="rate_window_min"></label>
+          <label>konfirmasi cut-off (menit) <input type="number" step="1" data-key="cutoff_confirm_min"></label>
+          <label>pemanasan minimum (menit) <input type="number" step="1" data-key="min_heat_min"></label>
+          <label>pemanasan maksimum (menit) <input type="number" step="1" data-key="max_heat_min"></label>
+          <label>toleransi berat naik (mg) <input type="number" step="any" data-key="rise_tolerance_mg"></label>
+          <label>berat sampel minimum (mg) <input type="number" step="any" data-key="min_sample_mg"></label>
+          <label>drift nol siap tare (mg/menit) <input type="number" step="any" data-key="ready_drift_mg_min"></label>
+          <label>model kurva
+            <select data-key="model">
+              <option value="exp">eksponensial</option>
+              <option value="exp_drift">eksponensial + drift</option>
+            </select>
+          </label>
+        </div>
+        <div class="row" style="margin-top:10px"><button id="saveSettings">Simpan pengaturan</button><span class="status" id="settingsNote">Tidak bisa diubah selama pemanasan.</span></div>
       </details>
     </section>
+
+    <!-- ================= LOG SERIAL ================= -->
+    <section class="panel">
+      <div class="panel-head"><h2>Serial terakhir</h2><span class="status" id="details"></span></div>
+      <div class="logbar">
+        <button id="freeze">Bekukan</button>
+        <button id="clear">Bersihkan</button>
+        <button id="download">Unduh</button>
+        <input id="filter" type="search" placeholder="filter teks, mis. CALPT atau Tare">
+      </div>
+      <pre id="log">Menunggu data...</pre>
+      <p class="status" style="margin:8px 0 0" id="logmeta">0 baris</p>
+    </section>
+
+    <!-- ================= PERAWATAN & KALIBRASI ================= -->
+    <details class="maint">
+      <summary>Perawatan &amp; kalibrasi &mdash; tuning, diagnostik, anak timbangan</summary>
+      <div class="maint-body">
+        <section class="panel">
+          <h2>Perintah firmware</h2>
+          <div class="actions">
+            <button data-command="t">Tare</button>
+            <button data-command="z">Self-cal ADS1232</button>
+            <button data-command="r">Reset ADS1232</button>
+            <button data-command="p">Diagnostik load cell</button>
+            <button data-command="x">Diagnostik RTD</button>
+            <button data-command="?">Bantuan</button>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <input id="calGrams" type="search" placeholder="gram anak timbangan" value="50">
+            <button id="calBtn">Kalibrasi 1 titik</button>
+          </div>
+          <p class="status">Kalibrasi span selalu dengan beban terbesar yang ada: error skala = drift selama jeda &divide; berat beban.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Tampilan angka berat</h2>
+          <div class="dispbar">
+            <label><input type="checkbox" id="calmOn" checked> tampilan tenang</label>
+            <label>dead band <input type="number" id="deadband" value="3" min="0" max="500" step="1"> mg</label>
+            <label>abaikan gerak &lt; <input type="number" id="stick" value="2" min="0" max="500" step="1"> mg</label>
+          </div>
+          <p class="status">Hanya angka besar di atas yang dihaluskan. Log, siklus, dan kalibrasi memakai nilai asli.
+            Catatan: mode tenang menahan angka lalu melepasnya sekaligus, sehingga drift pelan bisa terlihat seperti lompatan.
+            Lihat angka "asli" di bawahnya untuk gerak yang sebenarnya.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Kalibrasi multi-titik</h2>
+            <span class="status" id="calState">nol belum direkam</span>
+          </div>
+          <ol class="steps">
+            <li>
+              <b>Kosongkan timbangan</b>, lalu <button id="calZero">Rekam NOL</button>
+              <span class="status">tiap titik dikoreksi dengan nol sebelum &amp; sesudahnya, itu yang membatalkan drift</span>
+            </li>
+            <li>
+              <b>Pilih beban</b> yang akan diletakkan:
+              <div class="weights" id="weights"></div>
+              <div class="row" style="margin-top:8px">
+                <input id="calManual" type="search" placeholder="atau ketik sendiri, dalam mg">
+                <label class="status"><input type="radio" name="dir" value="U" checked> naik</label>
+                <label class="status"><input type="radio" name="dir" value="D"> turun</label>
+              </div>
+            </li>
+            <li>
+              <b>Letakkan bebannya</b>, tunggu diam, lalu
+              <button id="calPoint" disabled>Beban sudah diletakkan</button>
+              <span class="status">merekam 64 sampel (~6,4 detik)</span>
+            </li>
+            <li><b>Angkat beban</b> dan tekan <b>Rekam NOL</b> lagi, lalu ulangi untuk beban berikutnya.</li>
+          </ol>
+          <div class="row" style="margin-top:14px">
+            <button id="calApply" disabled>Terapkan ke firmware</button>
+            <button id="calCsv">Unduh CSV</button>
+            <button id="calClear">Hapus semua titik</button>
+          </div>
+          <div id="calFit" class="status" style="margin-top:14px">Belum ada titik.</div>
+          <div style="overflow:auto"><table id="calTable"></table></div>
+          <details id="calReportBox" hidden>
+            <summary>Ringkasan siap tempel ke laporan</summary>
+            <pre id="calReport" style="height:auto;max-height:320px;margin-top:8px"></pre>
+          </details>
+        </section>
+      </div>
+    </details>
   </main>
+
   <script>
     const el = id => document.getElementById(id);
-    const MAX_CLIENT_LINES = 20000;
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const num = (value, digits) => value === null || value === undefined || !Number.isFinite(value) ? '--' : value.toFixed(digits);
+    const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-    let nextSeq = 0;          // nomor urut baris berikutnya yang belum diambil dari server
-    let firstSeq = 0;         // nomor urut absolut buffer[0]
-    let buffer = [];          // seluruh baris yang sudah diterima
-    let frozen = false;
-    let frozenLen = 0;        // panjang buffer saat dibekukan; baris setelah ini tidak ditampilkan
-    let dirty = true;         // perlu render ulang
+    async function sendCommand(command) {
+      const response = await fetch('/api/command', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command })
+      });
+      if (!response.ok) alert('Perintah ditolak atau serial belum terhubung.');
+    }
+
+    // =========================================================================
+    //  Status langsung + log serial
+    // =========================================================================
+    const MAX_CLIENT_LINES = 20000;
+    let nextSeq = 0, firstSeq = 0, buffer = [];
+    let frozen = false, frozenLen = 0, dirty = true, shownKey = null, shownCount = 0;
 
     function visibleLines() {
       const needle = el('filter').value.trim().toLowerCase();
@@ -175,16 +316,12 @@
       return out;
     }
 
-    let shownKey = null;      // penanda isi <pre> saat ini, supaya tidak dibangun ulang percuma
-    let shownCount = 0;
-
-    function render() {
+    function renderLog() {
       if (!dirty) return;
       dirty = false;
       const pre = el('log');
       const key = `${frozen ? frozenLen : buffer.length}|${firstSeq}|${el('filter').value}`;
       if (key !== shownKey) {
-        // textContent mereset scrollTop, jadi posisi scroll disimpan dan dipasang ulang
         const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
         const previousTop = pre.scrollTop;
         const lines = visibleLines();
@@ -194,38 +331,27 @@
         pre.scrollTop = (!frozen && atBottom) ? pre.scrollHeight : previousTop;
       }
       pre.classList.toggle('frozen', frozen);
-      el('logmeta').innerHTML = `${shownCount} baris tampil / ${buffer.length} tersimpan` +
-        (frozen ? ` &nbsp;<span class="held">BEKU &mdash; ${buffer.length - frozenLen} baris baru tertahan</span>` : '');
+      el('logmeta').textContent = `${shownCount} baris tampil / ${buffer.length} tersimpan`;
+      if (frozen) {
+        const held = document.createElement('span');
+        held.className = 'held';
+        held.textContent = `  BEKU — ${buffer.length - frozenLen} baris baru tertahan`;
+        el('logmeta').appendChild(held);
+      }
     }
 
-    // Tampilan tenang. MURNI KOSMETIK: hanya angka besar di atas yang dihaluskan.
-    // Log, CSV, kalibrasi, dan analisis tetap memakai nilai asli, supaya tidak ada
-    // data terukur yang hilang.
-    //
-    // Dua mekanisme:
-    //   dead band  -> |nilai| di bawah ambang ditampilkan 0,000 (dengan histeresis
-    //                 1,5x saat keluar, supaya tidak berkedip di tepi ambang)
-    //   sticky     -> angka hanya diperbarui kalau bergeser lebih dari `stick`,
-    //                 sehingga digit terakhir tidak bergetar karena noise
-    //
-    // Ini TIDAK menggeser offset tare (zero tracking). Zero tracking sengaja tidak
-    // dibuat: ia tidak bisa membedakan drift lambat dari kehilangan massa lambat,
-    // dan pada kurva pengeringan ia akan memakan sinyal yang justru diukur.
+    // Tampilan tenang: MURNI KOSMETIK, hanya angka besar di atas yang dihaluskan.
+    // Sengaja bukan zero tracking: zero tracking tidak bisa membedakan drift lambat
+    // dari kehilangan massa lambat, dan akan memakan sinyal kurva pengeringan.
     let shownGrams = null;
-
     function calmGrams(trueGrams) {
       if (trueGrams === null) { shownGrams = null; return '--'; }
       if (!el('calmOn').checked) { shownGrams = trueGrams; return trueGrams.toFixed(3); }
-
       const deadband = Number(el('deadband').value) / 1000;
       const stick = Number(el('stick').value) / 1000;
       const exitAt = shownGrams === 0 ? deadband * 1.5 : deadband;
-
-      if (Math.abs(trueGrams) < exitAt) {
-        shownGrams = 0;
-      } else if (shownGrams === null || Math.abs(trueGrams - shownGrams) > stick) {
-        shownGrams = trueGrams;
-      }
+      if (Math.abs(trueGrams) < exitAt) shownGrams = 0;
+      else if (shownGrams === null || Math.abs(trueGrams - shownGrams) > stick) shownGrams = trueGrams;
       return shownGrams.toFixed(3);
     }
 
@@ -238,12 +364,12 @@
         const d = state.data;
         if (d) {
           el('temp').textContent = d.tempC.toFixed(2);
-          el('ohm').textContent = d.rtdOhm.toFixed(2);
+          el('ohm').textContent = `R ${d.rtdOhm.toFixed(2)} ohm`;
           el('grams').textContent = calmGrams(d.grams);
           el('gramsTrue').textContent = d.grams === null ? '' : `asli ${d.grams.toFixed(3)}`;
           el('status').textContent = d.status;
           el('raw').textContent = d.rawCounts;
-          el('details').textContent = `RTD fault 0x${d.rtdFault.toString(16).padStart(2, '0').toUpperCase()} | encoder ${d.encoder} | tombol ${d.button} | uptime ${d.seconds.toFixed(1)} s`;
+          el('details').textContent = `RTD fault 0x${d.rtdFault.toString(16).padStart(2, '0').toUpperCase()} | uptime ${d.seconds.toFixed(1)} s${d.uncal ? ' | UNCAL' : ''}`;
         }
         if (state.log.length) {
           if (!buffer.length) firstSeq = state.logFirstSeq;
@@ -253,10 +379,10 @@
             buffer.splice(0, drop);
             firstSeq += drop;
           }
-          dirty = true;  // saat beku, render() hanya memperbarui penghitung "tertahan"
+          dirty = true;
         }
         nextSeq = state.logNextSeq;
-        render();
+        renderLog();
       } catch (error) { el('connection').textContent = 'web tidak merespons'; }
     }
 
@@ -265,16 +391,9 @@
       frozenLen = buffer.length;
       el('freeze').textContent = frozen ? 'Lanjutkan' : 'Bekukan';
       el('freeze').classList.toggle('frozen', frozen);
-      dirty = true;
-      render();
+      dirty = true; renderLog();
     };
-    el('clear').onclick = () => {
-      firstSeq += buffer.length;
-      buffer = [];
-      frozenLen = 0;
-      dirty = true;
-      render();
-    };
+    el('clear').onclick = () => { firstSeq += buffer.length; buffer = []; frozenLen = 0; dirty = true; renderLog(); };
     el('download').onclick = () => {
       const blob = new Blob([visibleLines().join('\n')], { type: 'text/plain' });
       const link = document.createElement('a');
@@ -283,88 +402,537 @@
       link.click();
       URL.revokeObjectURL(link.href);
     };
-    el('filter').oninput = () => { dirty = true; render(); };
-
-    async function sendCommand(command) {
-      const response = await fetch('/api/command', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command })
-      });
-      if (!response.ok) alert('Perintah ditolak atau serial belum terhubung.');
-    }
-    document.querySelectorAll('button[data-command]').forEach(
-      button => button.onclick = () => sendCommand(button.dataset.command));
+    el('filter').oninput = () => { dirty = true; renderLog(); };
+    document.querySelectorAll('button[data-command]').forEach(b => b.onclick = () => sendCommand(b.dataset.command));
     el('calBtn').onclick = () => {
       const grams = el('calGrams').value.trim();
-      if (!/^[0-9]+(\.[0-9]+)?$/.test(grams)) { alert('Isi berat anak timbangan dalam gram, mis. 10'); return; }
+      if (!/^[0-9]+(\.[0-9]+)?$/.test(grams)) { alert('Isi berat anak timbangan dalam gram, mis. 50'); return; }
       sendCommand(`c ${grams}`);
     };
 
-    // ---------------- Kalibrasi multi-titik ----------------
-    // Ketidakpastian satu titik pada hardware ini +/-0.475 mg (SD raw 20.9 count
-    // / sqrt(64), pada 5499 count/g). Rasio sinyal/noise 10 tercapai di 4.75 mg,
-    // jadi beban di bawah WEAK_MG ditandai: angkanya didominasi noise, bukan massa.
-    const PRESETS_MG = [10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
-    const WEAK_MG = 5;
-    let pickedMg = null;
-    let busyUntil = 0;
+    // =========================================================================
+    //  Siklus sampel
+    // =========================================================================
+    const STEP_ORDER = ['prepare', 'load', 'heating', 'cutoff', 'done'];
+    const STEP_OF_PHASE = { prepare: 'prepare', taring: 'prepare', load: 'load', heating: 'heating', cutoff: 'cutoff', done: 'done' };
+    let cycle = null;
+    let chartKey = null;
 
+    const fmtMinutes = m => {
+      if (m === null || m === undefined || !Number.isFinite(m)) return '--';
+      const total = Math.max(0, Math.round(m * 60));
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+    };
+    const fmtGrams = mg => mg === null || mg === undefined ? '--' : (mg / 1000).toFixed(4);
+
+    async function cycleAction(action, settings) {
+      const needsConfirm = { abort: 'Batalkan siklus ini? Data yang sudah terekam tetap tersimpan.' };
+      if (needsConfirm[action] && !confirm(needsConfirm[action])) return;
+      try {
+        const response = await fetch('/api/cycle', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings ? { action, settings } : { action })
+        });
+        const result = await response.json();
+        el('cycleFeedback').textContent = result.ok ? '' : result.message;
+      } catch (error) { el('cycleFeedback').textContent = 'Server tidak merespons.'; }
+      refreshCycle();
+    }
+
+    function button(label, action, kind) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      if (kind) b.className = kind;
+      b.onclick = () => cycleAction(action);
+      return b;
+    }
+
+    function renderButtons(c) {
+      const box = el('cycleButtons');
+      box.replaceChildren();
+      const add = (...items) => items.forEach(i => box.appendChild(i));
+      switch (c.phase) {
+        case 'idle': add(button('Mulai siklus', 'start', 'primary')); break;
+        case 'prepare': add(button('Tare wadah kosong', 'tare', 'primary'), button('Batalkan', 'abort', 'danger')); break;
+        case 'taring': { const b = button('Tare berjalan...', 'tare'); b.disabled = true; add(b, button('Batalkan', 'abort', 'danger')); break; }
+        case 'load': add(button('Mulai pemanas', 'heat', 'primary'), button('Tare ulang', 'tare'), button('Batalkan', 'abort', 'danger')); break;
+        case 'heating': add(button('Hentikan pemanasan', 'stop'), button('Batalkan', 'abort', 'danger')); break;
+        case 'cutoff': add(button('Hentikan sekarang', 'stop'), button('Batalkan', 'abort', 'danger')); break;
+        default: add(button('Siklus baru', 'start', 'primary'), button('Bersihkan tampilan', 'reset'));
+      }
+    }
+
+    function renderStepper(c) {
+      const current = STEP_OF_PHASE[c.phase];
+      const currentIdx = STEP_ORDER.indexOf(current);
+      document.querySelectorAll('#stepper li').forEach(li => {
+        const idx = STEP_ORDER.indexOf(li.dataset.step);
+        li.classList.toggle('now', idx === currentIdx && c.phase !== 'done');
+        li.classList.toggle('done', currentIdx >= 0 && (idx < currentIdx || c.phase === 'done'));
+      });
+    }
+
+    function renderList(id, items) {
+      const box = el(id);
+      box.replaceChildren();
+      (items || []).forEach(text => { const li = document.createElement('li'); li.textContent = text; box.appendChild(li); });
+    }
+
+    function stat(label, value, sub) {
+      const div = document.createElement('div');
+      div.className = 'stat';
+      const l = document.createElement('label'); l.textContent = label;
+      const v = document.createElement('span'); v.className = 'v'; v.textContent = value;
+      div.append(l, v);
+      if (sub) { const s = document.createElement('span'); s.className = 's'; s.textContent = sub; div.appendChild(s); }
+      return div;
+    }
+
+    function renderStats(c) {
+      const box = el('cycleStats');
+      box.replaceChildren();
+      if (c.phase === 'idle') return;
+      const items = [];
+      if (c.m0Mg !== null) items.push(stat('Berat awal (m0)', `${fmtGrams(c.m0Mg)} g`, 'rata-rata 30 detik sebelum pemanas'));
+      const nowMg = c.latestMassMg !== null ? c.latestMassMg : c.liveMg;
+      if (nowMg !== null) items.push(stat('Berat sekarang', `${fmtGrams(nowMg)} g`, c.latestMassMg !== null ? 'nilai menit terakhir' : 'langsung'));
+      if (c.lossMg !== undefined) items.push(stat('Susut', `${num(c.lossMg, 1)} mg`, `${num(c.lossPct, 2)} % dari m0`));
+      if (c.latestRateMgMin !== null) items.push(stat('Laju sekarang', `${num(c.latestRateMgMin, 1)} mg/menit`, `puncak ${num(c.peakRateMgMin, 1)} · cut-off < ${c.cutoffRateMgMin}`));
+      if (c.elapsedMin !== null) items.push(stat('Waktu pemanasan', fmtMinutes(c.elapsedMin), c.currentMinuteSamples !== null ? `${c.currentMinuteSamples}/120 sampel menit ini` : ''));
+      if (c.prediction) {
+        const label = c.fitFinal ? 'Prediksi berhenti' : 'Prediksi sementara';
+        const sub = c.countdownMin !== null ? `sisa ${fmtMinutes(c.countdownMin)} · target ${c.targetRateMgMin} mg/menit` : `target ${c.targetRateMgMin} mg/menit`;
+        items.push(stat(label, `menit ${num(c.prediction.t_stop_min, 1)}`, sub));
+      }
+      if (c.moistureAtStopPct !== undefined) items.push(stat('Kadar air (prediksi)', `${num(c.moistureAtStopPct, 2)} %`, `basis basah · asimtot ${num(c.moistureAsymptoticPct, 2)} %`));
+      if (c.fit) items.push(stat('Model', `tau ${num(c.fit.tau_min, 1)} menit`, `R² ${num(c.fit.r2, 4)} · RMS ${num(c.fit.rms_mg, 2)} mg`));
+      if (c.validationRmsMg !== undefined) items.push(stat('Validasi setelah cut-off', `RMS ${num(c.validationRmsMg, 2)} mg`, `${c.validationPoints} menit, terukur vs model`));
+      items.forEach(i => box.appendChild(i));
+    }
+
+    function renderReadiness(c) {
+      let text = '';
+      if (c.phase === 'prepare' || c.phase === 'taring') {
+        const d = c.zeroDriftMgMin;
+        text = d === null ? 'Drift nol: mengumpulkan data 3 menit...'
+          : `Drift nol ${num(d, 2)} mg/menit (ambang ${c.settings.ready_drift_mg_min}) — ${c.zeroReady ? 'SIAP untuk tare' : 'tunggu, masih bergerak'}`;
+      } else if (c.phase === 'load') {
+        text = `Berat sekarang ${num(c.liveMg, 1)} mg · gerak ${c.creepMgMin === null ? '--' : num(c.creepMgMin, 2)} mg/menit (creep). ` +
+               'Pemanas belum terpasang: Mulai pemanas hanya menandai waktu nol.';
+      } else if (c.phase === 'heating') {
+        text = 'Simulasi: kurangi berat pelan-pelan (air menguap / diserap tisu). Titik baru muncul tiap menit.';
+      }
+      el('readiness').textContent = text;
+    }
+
+    function renderTable(c) {
+      const table = el('minuteTable');
+      table.replaceChildren();
+      const head = ['menit', 'berat (g)', 'laju (mg/menit)', 'sebaran (mg)', 'sampel', 'suhu (°C)', 'status', 'residu model (mg)'];
+      const tr = document.createElement('tr');
+      head.forEach(h => { const th = document.createElement('th'); th.textContent = h; tr.appendChild(th); });
+      table.appendChild(tr);
+      c.minutes.forEach(m => {
+        const row = document.createElement('tr');
+        const status = m.flags.length ? m.flags.join(', ') + ' — dikeluarkan' : (m.after_cutoff ? 'validasi' : 'dipakai');
+        const cells = [
+          num(m.t_mid_min, 1), fmtGrams(m.mass_mg), num(m.rate_mg_min, 2), num(m.spread_mg, 2),
+          `${m.n_used ?? '--'}/${m.n}`, num(m.temp_c, 1), status, num(m.fit_residual_mg, 2)
+        ];
+        cells.forEach((v, i) => {
+          const td = document.createElement('td');
+          td.textContent = v;
+          if (i === 6 && m.flags.length) td.className = 'warn';
+          row.appendChild(td);
+        });
+        table.appendChild(row);
+      });
+    }
+
+    function renderFiles(c) {
+      const box = el('cycleFiles');
+      box.replaceChildren();
+      if (!c.files) { box.textContent = 'Belum ada siklus.'; return; }
+      box.append(`Folder data/cycle_${c.cycleId}: `);
+      c.files.forEach((name, i) => {
+        const a = document.createElement('a');
+        a.href = `/api/cycle/files/${name}`;
+        a.textContent = name;
+        a.style.color = 'var(--accent)';
+        a.target = '_blank';
+        box.appendChild(a);
+        if (i < c.files.length - 1) box.append(' · ');
+      });
+    }
+
+    let settingsLoadedFor = null;
+    function renderSettings(c) {
+      const locked = c.phase === 'heating' || c.phase === 'cutoff';
+      document.querySelectorAll('#settingsForm [data-key]').forEach(input => { input.disabled = locked; });
+      el('saveSettings').disabled = locked;
+      const key = `${c.cycleId}|${c.phase}`;
+      if (settingsLoadedFor === key || document.activeElement?.closest('#settingsForm')) return;
+      settingsLoadedFor = key;
+      document.querySelectorAll('#settingsForm [data-key]').forEach(input => { input.value = c.settings[input.dataset.key]; });
+    }
+    el('saveSettings').onclick = () => {
+      const settings = {};
+      document.querySelectorAll('#settingsForm [data-key]').forEach(input => { settings[input.dataset.key] = input.value; });
+      settingsLoadedFor = null;
+      cycleAction('settings', settings);
+    };
+
+    function renderCycle(c) {
+      el('cycleId').textContent = c.cycleId ? `siklus ${c.cycleId} · ${c.phaseLabel}` : c.phaseLabel;
+      el('cycleMessage').textContent = c.message;
+      renderStepper(c);
+      renderReadiness(c);
+      renderList('cycleWarnings', c.warnings);
+      renderButtons(c);
+      renderStats(c);
+      renderList('cycleConfidence', c.confidence);
+      renderSettings(c);
+      renderFiles(c);
+
+      const inCycle = c.phase === 'heating' || c.phase === 'cutoff';
+      el('rateTile').textContent = inCycle && c.latestRateMgMin !== null ? num(c.latestRateMgMin, 1) : '--';
+      el('rateTileSub').textContent = inCycle ? `cut-off < ${c.cutoffRateMgMin}` : 'di luar siklus';
+
+      const key = JSON.stringify([c.cycleId, c.phase, c.minutes.length, c.fit && c.fit.tau_min, c.fitFinal, c.prediction && c.prediction.t_stop_min]);
+      if (key !== chartKey) {
+        chartKey = key;
+        renderTable(c);
+        drawCharts();
+      }
+    }
+
+    async function refreshCycle() {
+      try {
+        cycle = await fetch('/api/cycle', { cache: 'no-store' }).then(r => r.json());
+        renderCycle(cycle);
+      } catch (error) { /* biarkan tampilan lama */ }
+    }
+
+    // =========================================================================
+    //  Grafik (SVG tanpa pustaka luar, supaya jalan tanpa internet)
+    // =========================================================================
+    function svg(tag, attrs, parent) {
+      const node = document.createElementNS(SVGNS, tag);
+      for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+      if (parent) parent.appendChild(node);
+      return node;
+    }
+
+    function niceStep(range, count) {
+      const raw = range / Math.max(1, count);
+      const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const norm = raw / mag;
+      return (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+    }
+    function linearTicks(lo, hi, count) {
+      const step = niceStep(hi - lo, count);
+      const out = [];
+      for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(v);
+      return { ticks: out, step };
+    }
+    function logTicks(lo, hi) {
+      const out = [];
+      for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) {
+        const v = Math.pow(10, e);
+        if (v >= lo * 0.999 && v <= hi * 1.001) out.push(v);
+      }
+      return out;
+    }
+    const decimalsFor = step => Math.max(0, -Math.floor(Math.log10(step)));
+
+    function modelMass(fit, t) { const s = t - fit.t0; return fit.m_inf_mg + fit.amplitude_mg * Math.exp(-s / fit.tau_min) + fit.drift_mg_per_min * s; }
+    function modelRate(fit, t) { const s = t - fit.t0; return fit.amplitude_mg / fit.tau_min * Math.exp(-s / fit.tau_min); }
+
+    function legendKey(kind, color) {
+      const k = svg('svg', { width: 18, height: 12 });
+      if (kind === 'dot') svg('circle', { cx: 9, cy: 6, r: 4, fill: color }, k);
+      else if (kind === 'ring') svg('circle', { cx: 9, cy: 6, r: 3.5, fill: 'none', stroke: color, 'stroke-width': 2 }, k);
+      else if (kind === 'cross') { svg('path', { d: 'M5 2 L13 10 M13 2 L5 10', stroke: color, 'stroke-width': 2 }, k); }
+      else if (kind === 'dash') svg('line', { x1: 1, y1: 6, x2: 17, y2: 6, stroke: color, 'stroke-width': 2, 'stroke-dasharray': '4 3' }, k);
+      else svg('line', { x1: 1, y1: 6, x2: 17, y2: 6, stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round' }, k);
+      return k;
+    }
+    function renderLegend(id, entries) {
+      const box = el(id);
+      box.replaceChildren();
+      entries.forEach(([kind, color, label]) => {
+        const span = document.createElement('span');
+        span.append(legendKey(kind, color), document.createTextNode(label));
+        box.appendChild(span);
+      });
+    }
+
+    // Kerangka satu grafik: sumbu, grid rambut, garis referensi berlabel.
+    function frame(host, width, height, xDomain, yDomain, yLog, yFormat, xLabel) {
+      const m = { l: 62, r: 14, t: 10, b: 34 };
+      const pw = width - m.l - m.r, ph = height - m.t - m.b;
+      const root = svg('svg', { class: 'chart-svg', viewBox: `0 0 ${width} ${height}`, tabindex: 0, role: 'img' });
+      host.appendChild(root);
+      const x = t => m.l + (t - xDomain[0]) / (xDomain[1] - xDomain[0]) * pw;
+      const y = yLog
+        ? v => m.t + (1 - (Math.log10(v) - Math.log10(yDomain[0])) / (Math.log10(yDomain[1]) - Math.log10(yDomain[0]))) * ph
+        : v => m.t + (1 - (v - yDomain[0]) / (yDomain[1] - yDomain[0])) * ph;
+      const muted = css('--muted'), grid = css('--grid'), axis = css('--axis');
+      const text = (tx, ty, s, anchor) => { const n = svg('text', { x: tx, y: ty, fill: muted, 'font-size': 11, 'font-family': 'ui-monospace, monospace', 'text-anchor': anchor || 'start' }, root); n.textContent = s; return n; };
+
+      const yt = yLog ? { ticks: logTicks(yDomain[0], yDomain[1]) } : linearTicks(yDomain[0], yDomain[1], 5);
+      yt.ticks.forEach(v => {
+        svg('line', { x1: m.l, x2: m.l + pw, y1: y(v), y2: y(v), stroke: grid, 'stroke-width': 1 }, root);
+        text(m.l - 6, y(v) + 4, yFormat(v, yt.step), 'end');
+      });
+      const xt = linearTicks(xDomain[0], xDomain[1], 6);
+      xt.ticks.forEach(v => { text(x(v), m.t + ph + 16, String(Math.round(v)), 'middle'); });
+      svg('line', { x1: m.l, x2: m.l + pw, y1: m.t + ph, y2: m.t + ph, stroke: axis, 'stroke-width': 1 }, root);
+      text(m.l + pw, m.t + ph + 30, xLabel, 'end');
+
+      const plot = svg('g', {}, root);
+      const refX = (t, label) => {
+        if (t < xDomain[0] || t > xDomain[1]) return;
+        svg('line', { x1: x(t), x2: x(t), y1: m.t, y2: m.t + ph, stroke: muted, 'stroke-width': 1, 'stroke-dasharray': '3 4' }, root);
+        text(x(t) + 4, m.t + 12, label);
+      };
+      const refY = (v, label) => {
+        if (v < yDomain[0] || v > yDomain[1]) return;
+        svg('line', { x1: m.l, x2: m.l + pw, y1: y(v), y2: y(v), stroke: muted, 'stroke-width': 1, 'stroke-dasharray': '3 4' }, root);
+        text(m.l + pw - 4, y(v) - 5, label, 'end');
+      };
+      return { root, plot, x, y, m, pw, ph, refX, refY };
+    }
+
+    function path(points, x, y) {
+      return points.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
+    }
+    function line(parent, points, x, y, color, dashed) {
+      if (points.length < 2) return;
+      svg('path', { d: path(points, x, y), fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', ...(dashed ? { 'stroke-dasharray': '6 5' } : {}) }, parent);
+    }
+    function dot(parent, cx, cy, color, hollow) {
+      const surface = css('--panel');
+      if (hollow) svg('circle', { cx, cy, r: 4, fill: surface, stroke: color, 'stroke-width': 2 }, parent);
+      else svg('circle', { cx, cy, r: 4, fill: color, stroke: surface, 'stroke-width': 2 }, parent);
+    }
+    function cross(parent, cx, cy, color) {
+      svg('path', { d: `M${cx - 4},${cy - 4} L${cx + 4},${cy + 4} M${cx + 4},${cy - 4} L${cx - 4},${cy + 4}`, stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round' }, parent);
+    }
+    function sampleCurve(fn, t0, t1, n) {
+      const out = [];
+      for (let i = 0; i <= n; i++) { const t = t0 + (t1 - t0) * i / n; out.push([t, fn(t)]); }
+      return out;
+    }
+
+    // Crosshair + tooltip: menempel ke menit terdekat, juga lewat tombol panah.
+    function crosshair(fr, host, tip, xs, rowsFor) {
+      if (!xs.length) return;
+      const muted = css('--muted');
+      const hair = svg('line', { y1: fr.m.t, y2: fr.m.t + fr.ph, stroke: muted, 'stroke-width': 1, visibility: 'hidden' }, fr.root);
+      const hit = svg('rect', { x: fr.m.l, y: fr.m.t, width: fr.pw, height: fr.ph, fill: 'transparent' }, fr.root);
+      let current = -1;
+      const show = idx => {
+        current = Math.max(0, Math.min(xs.length - 1, idx));
+        const t = xs[current];
+        const px = fr.x(t);
+        hair.setAttribute('x1', px); hair.setAttribute('x2', px); hair.setAttribute('visibility', 'visible');
+        tip.replaceChildren();
+        const head = document.createElement('div'); head.className = 't'; head.textContent = `menit ${t.toFixed(1)}`;
+        tip.appendChild(head);
+        rowsFor(t).forEach(([color, value, label]) => {
+          const r = document.createElement('div'); r.className = 'r';
+          const key = document.createElement('i'); key.style.background = color;
+          const b = document.createElement('b'); b.textContent = value;
+          r.append(key, b, document.createTextNode(label));
+          tip.appendChild(r);
+        });
+        tip.style.display = 'block';
+        const scale = fr.root.getBoundingClientRect().width / fr.root.viewBox.baseVal.width;
+        const left = px * scale + 12 + 12;
+        const maxLeft = host.clientWidth - tip.offsetWidth - 4;
+        tip.style.left = `${Math.min(left, maxLeft)}px`;
+        tip.style.top = `${fr.m.t * scale + 48}px`;
+      };
+      const hide = () => { hair.setAttribute('visibility', 'hidden'); tip.style.display = 'none'; };
+      hit.addEventListener('pointermove', ev => {
+        const box = fr.root.getBoundingClientRect();
+        const scale = box.width / fr.root.viewBox.baseVal.width;
+        const tx = (ev.clientX - box.left) / scale;
+        let best = 0, bestD = Infinity;
+        xs.forEach((t, i) => { const d = Math.abs(fr.x(t) - tx); if (d < bestD) { bestD = d; best = i; } });
+        show(best);
+      });
+      hit.addEventListener('pointerleave', hide);
+      fr.root.addEventListener('focus', () => show(current < 0 ? xs.length - 1 : current));
+      fr.root.addEventListener('blur', hide);
+      fr.root.addEventListener('keydown', ev => {
+        if (ev.key === 'ArrowLeft') { show(current - 1); ev.preventDefault(); }
+        if (ev.key === 'ArrowRight') { show(current + 1); ev.preventDefault(); }
+      });
+    }
+
+    function xExtent(c) {
+      let hi = 5;
+      c.minutes.forEach(m => { hi = Math.max(hi, m.index + 1); });
+      if (c.prediction) hi = Math.max(hi, c.prediction.t_stop_min * 1.05);
+      return [0, hi];
+    }
+
+    function drawMass(c) {
+      const host = el('chartMass'), tip = el('tipMass');
+      host.replaceChildren(); tip.style.display = 'none';
+      const colors = { measured: css('--series-measured'), monotone: css('--series-monotone'), model: css('--series-model'), critical: css('--status-critical') };
+      const legend = [['dot', colors.measured, 'terukur per menit'], ['line', colors.monotone, 'terkoreksi (tidak boleh naik)']];
+      if (c.fit) legend.push(['line', colors.model, c.fitFinal ? 'model' : 'model sementara'], ['dash', colors.model, 'ekstrapolasi']);
+      if (c.minutes.some(m => m.after_cutoff)) legend.push(['ring', colors.measured, 'terukur setelah cut-off (validasi)']);
+      if (c.minutes.some(m => m.flags.length)) legend.push(['cross', colors.critical, 'ditolak (naik / data kurang)']);
+      renderLegend('legendMass', legend);
+
+      const measured = c.minutes.filter(m => m.mass_mg !== null);
+      if (!measured.length) {
+        const e = document.createElement('div'); e.className = 'empty';
+        e.textContent = c.phase === 'heating' ? 'Titik pertama muncul setelah menit pertama selesai.' : 'Grafik muncul saat pemanasan berjalan.';
+        host.appendChild(e); return;
+      }
+      const [x0, x1] = xExtent(c);
+      const values = measured.map(m => m.mass_mg).concat(c.monotone.map(p => p.mass_mg));
+      if (c.m0Mg !== null) values.push(c.m0Mg);
+      if (c.fit) values.push(modelMass(c.fit, x1), modelMass(c.fit, c.fit.t_first));
+      let lo = Math.min(...values), hi = Math.max(...values);
+      const pad = Math.max((hi - lo) * 0.08, 1);
+      lo -= pad; hi += pad;
+      const fr = frame(host, Math.max(320, host.clientWidth), 260, [x0, x1], [lo / 1000, hi / 1000], false,
+        (v, step) => v.toFixed(Math.max(3, decimalsFor(step))), 'menit sejak pemanas mulai');
+      const y = v => fr.y(v / 1000);
+
+      if (c.cutoffMin !== null) fr.refX(c.cutoffMin, 'cut-off');
+      if (c.prediction) fr.refX(c.prediction.t_stop_min, c.fitFinal ? 'berhenti (prediksi)' : 'berhenti (sementara)');
+
+      line(fr.plot, c.monotone.map(p => [p.t_mid_min, p.mass_mg]), fr.x, y, colors.monotone, false);
+      if (c.fit) {
+        const tEnd = c.fit.t_last;
+        line(fr.plot, sampleCurve(t => modelMass(c.fit, t), c.fit.t_first, tEnd, 60), fr.x, y, colors.model, false);
+        const tFar = c.prediction ? Math.max(c.prediction.t_stop_min, tEnd) : x1;
+        line(fr.plot, sampleCurve(t => modelMass(c.fit, t), tEnd, tFar, 80), fr.x, y, colors.model, true);
+      }
+      if (c.m0Mg !== null) dot(fr.plot, fr.x(0), y(c.m0Mg), colors.measured, false);
+      measured.forEach(m => {
+        const cx = fr.x(m.t_mid_min), cy = y(m.mass_mg);
+        if (m.flags.length) cross(fr.plot, cx, cy, colors.critical);
+        else dot(fr.plot, cx, cy, colors.measured, m.after_cutoff);
+      });
+
+      const monoAt = new Map(c.monotone.map(p => [p.t_mid_min, p.mass_mg]));
+      crosshair(fr, host.parentElement, tip, measured.map(m => m.t_mid_min), t => {
+        const m = measured.find(k => k.t_mid_min === t);
+        const rows = [[colors.measured, `${fmtGrams(m.mass_mg)} g`, m.flags.length ? `terukur — ${m.flags.join(', ')}, dikeluarkan` : (m.after_cutoff ? 'terukur (validasi)' : 'terukur')]];
+        if (monoAt.has(t)) rows.push([colors.monotone, `${fmtGrams(monoAt.get(t))} g`, 'terkoreksi']);
+        if (c.fit) rows.push([colors.model, `${fmtGrams(modelMass(c.fit, t))} g`, 'model']);
+        if (c.m0Mg !== null) rows.push([css('--muted'), `${num(c.m0Mg - m.mass_mg, 1)} mg`, 'susut dari m0']);
+        return rows;
+      });
+    }
+
+    function drawRate(c) {
+      const host = el('chartRate'), tip = el('tipRate');
+      host.replaceChildren(); tip.style.display = 'none';
+      const colors = { measured: css('--series-measured'), model: css('--series-model') };
+      const legend = [['dot', colors.measured, 'laju terukur (5 menit, Theil-Sen)']];
+      if (c.fit) legend.push(['line', colors.model, c.fitFinal ? 'laju model' : 'laju model sementara'], ['dash', colors.model, 'ekstrapolasi']);
+      renderLegend('legendRate', legend);
+
+      const rated = c.minutes.filter(m => m.rate_mg_min !== null && m.rate_mg_min > 0);
+      if (!rated.length) {
+        const e = document.createElement('div'); e.className = 'empty';
+        e.textContent = 'Laju butuh minimal 3 menit data yang sah.';
+        host.appendChild(e); return;
+      }
+      const [x0, x1] = xExtent(c);
+      const values = rated.map(m => m.rate_mg_min).concat([c.cutoffRateMgMin, c.targetRateMgMin]);
+      if (c.fit) values.push(modelRate(c.fit, c.fit.t_first), modelRate(c.fit, x1));
+      const lo = Math.max(1e-3, Math.min(...values.filter(v => v > 0)) / 1.8);
+      const hi = Math.max(...values) * 1.8;
+      const fr = frame(host, Math.max(320, host.clientWidth), 260, [x0, x1], [lo, hi], true,
+        v => v >= 1 ? String(Math.round(v)) : String(v), 'menit sejak pemanas mulai');
+
+      fr.refY(c.cutoffRateMgMin, `cut-off load cell ${c.cutoffRateMgMin} mg/menit`);
+      fr.refY(c.targetRateMgMin, `target berhenti ${c.targetRateMgMin} mg/menit`);
+      if (c.cutoffMin !== null) fr.refX(c.cutoffMin, 'cut-off');
+      if (c.fit) {
+        const tEnd = c.fit.t_last;
+        line(fr.plot, sampleCurve(t => modelRate(c.fit, t), c.fit.t_first, tEnd, 40), fr.x, fr.y, colors.model, false);
+        const tFar = c.prediction ? Math.max(c.prediction.t_stop_min, tEnd) : x1;
+        line(fr.plot, sampleCurve(t => modelRate(c.fit, t), tEnd, tFar, 40), fr.x, fr.y, colors.model, true);
+      }
+      rated.forEach(m => dot(fr.plot, fr.x(m.t_mid_min), fr.y(m.rate_mg_min), colors.measured, false));
+
+      crosshair(fr, host.parentElement, tip, rated.map(m => m.t_mid_min), t => {
+        const m = rated.find(k => k.t_mid_min === t);
+        const rows = [[colors.measured, `${num(m.rate_mg_min, 2)} mg/menit`, 'terukur']];
+        if (c.fit) rows.push([colors.model, `${num(modelRate(c.fit, t), 2)} mg/menit`, 'model']);
+        return rows;
+      });
+    }
+
+    function drawCharts() {
+      if (!cycle) return;
+      drawMass(cycle);
+      drawRate(cycle);
+    }
+    let resizeTimer = null;
+    new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawCharts, 120); }).observe(el('cyclePanel'));
+
+    // =========================================================================
+    //  Kalibrasi multi-titik (perawatan)
+    // =========================================================================
+    // Ketidakpastian satu titik +/-0.475 mg (SD raw / sqrt(64)); S/N 10 di 4.75 mg.
+    const PRESETS_MG = [50000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
+    const WEAK_MG = 5;
+    let pickedMg = null, busyUntil = 0, fittedCountsPerGram = null;
     const formatMg = mg => mg >= 1000 ? `${mg / 1000} g` : `${mg} mg`;
 
     PRESETS_MG.forEach(mg => {
-      const button = document.createElement('button');
-      button.textContent = formatMg(mg);
-      button.className = mg < WEAK_MG ? 'weak' : '';
-      if (mg < WEAK_MG) button.title = 'Di bawah ~5 mg rasio sinyal/noise < 10 pada load cell 300 g ini';
-      button.onclick = () => pickWeight(mg, button);
-      el('weights').appendChild(button);
+      const b = document.createElement('button');
+      b.textContent = formatMg(mg);
+      b.className = mg < WEAK_MG ? 'weak' : '';
+      if (mg < WEAK_MG) b.title = 'Di bawah ~5 mg rasio sinyal/noise < 10 pada load cell 300 g ini';
+      b.onclick = () => {
+        pickedMg = mg; el('calManual').value = '';
+        document.querySelectorAll('#weights button').forEach(x => x.classList.toggle('picked', x === b));
+        updateCalButtons();
+      };
+      el('weights').appendChild(b);
     });
-
-    function pickWeight(mg, button) {
-      pickedMg = mg;
-      el('calManual').value = '';
-      document.querySelectorAll('#weights button').forEach(b => b.classList.toggle('picked', b === button));
-      updateCalButtons();
-    }
-
     function chosenMg() {
       const manual = el('calManual').value.trim();
       if (manual) return /^[0-9]+(\.[0-9]+)?$/.test(manual) ? Number(manual) : null;
       return pickedMg;
     }
-
     function updateCalButtons() {
       const busy = Date.now() < busyUntil;
       el('calPoint').disabled = busy || chosenMg() === null;
       el('calZero').disabled = busy;
     }
-
     function startMeasurement(command) {
       busyUntil = Date.now() + 7500;
       updateCalButtons();
       sendCommand(command);
       const tick = setInterval(() => {
         const left = Math.ceil((busyUntil - Date.now()) / 1000);
-        if (left > 0) {
-          el('calState').textContent = `mengukur 64 sampel... ${left} s`;
-        } else {
-          clearInterval(tick);
-          updateCalButtons();
-          refreshCalibration();
-        }
+        if (left > 0) el('calState').textContent = `mengukur 64 sampel... ${left} s`;
+        else { clearInterval(tick); updateCalButtons(); refreshCalibration(); }
       }, 250);
     }
-
     el('calZero').onclick = () => startMeasurement('n');
     el('calPoint').onclick = () => {
       const mg = chosenMg();
       if (mg === null) { alert('Pilih beban dulu, atau ketik nilainya dalam mg.'); return; }
-      const direction = document.querySelector('input[name=dir]:checked').value;
-      startMeasurement(`m ${mg} ${direction}`);
+      startMeasurement(`m ${mg} ${document.querySelector('input[name=dir]:checked').value}`);
     };
     el('calManual').oninput = () => {
       pickedMg = null;
-      document.querySelectorAll('#weights button').forEach(b => b.classList.remove('picked'));
+      document.querySelectorAll('#weights button').forEach(x => x.classList.remove('picked'));
       updateCalButtons();
     };
     el('calCsv').onclick = () => window.open('/api/calibration.csv', '_blank');
@@ -373,74 +941,63 @@
       await fetch('/api/calibration/clear', { method: 'POST' });
       refreshCalibration();
     };
-
-    let fittedCountsPerGram = null;
     el('calApply').onclick = () => {
       if (fittedCountsPerGram === null) return;
       if (!confirm(`Kirim countsPerGram = ${fittedCountsPerGram.toFixed(3)} ke firmware dan simpan ke NVS?`)) return;
       sendCommand(`s ${fittedCountsPerGram.toFixed(3)}`);
     };
 
-    const num = (value, digits) => value === null || value === undefined ? '--' : value.toFixed(digits);
-
     function renderCalibration(cal) {
       el('calState').textContent = cal.pendingZero === null
         ? 'nol belum direkam — mulai dari langkah 1'
         : `nol terakhir ${cal.pendingZero.toFixed(2)} count | ${cal.points.length} titik terekam`;
-
       const fit = cal.fit, stats = cal.metrics;
       fittedCountsPerGram = fit ? fit.counts_per_gram : null;
       el('calApply').disabled = fit === null;
-
+      const table = el('calTable');
+      table.replaceChildren();
       if (!fit) {
         el('calFit').textContent = cal.points.length
-          ? `${cal.points.length} titik terekam — butuh minimal 2 titik dengan nol untuk bisa difit.`
-          : 'Belum ada titik.';
-        el('calTable').innerHTML = '';
+          ? `${cal.points.length} titik terekam — butuh minimal 2 titik dengan nol untuk bisa difit.` : 'Belum ada titik.';
         el('calReportBox').hidden = true;
         return;
       }
-
-      el('calFit').innerHTML =
-        `countsPerGram <span class="kv">${num(fit.counts_per_gram, 3)}</span> &nbsp;|&nbsp; ` +
-        `R<sup>2</sup> <span class="kv">${fit.r2.toFixed(6)}</span> &nbsp;|&nbsp; ` +
-        `residual maks <span class="kv">${num(stats.max_residual_mg, 3)} mg</span> &nbsp;|&nbsp; ` +
-        `RMS <span class="kv">${num(stats.rms_residual_mg, 3)} mg</span> &nbsp;|&nbsp; ` +
-        `nonlinearitas <span class="kv">${num(stats.nonlinearity_pct_fs, 4)} %FS</span> &nbsp;|&nbsp; ` +
-        `histeresis <span class="kv">${num(stats.hysteresis_mg, 3)} mg</span> &nbsp;|&nbsp; ` +
-        `repeatability <span class="kv">${num(stats.repeatability_mg, 3)} mg</span>`;
-
+      el('calFit').textContent =
+        `countsPerGram ${num(fit.counts_per_gram, 3)} | R² ${fit.r2.toFixed(6)} | residual maks ${num(stats.max_residual_mg, 3)} mg | ` +
+        `RMS ${num(stats.rms_residual_mg, 3)} mg | nonlinearitas ${num(stats.nonlinearity_pct_fs, 4)} %FS | ` +
+        `histeresis ${num(stats.hysteresis_mg, 3)} mg | repeatability ${num(stats.repeatability_mg, 3)} mg`;
       const head = ['nominal', 'arah', 'raw bersih', 'terukur (mg)', 'residual (mg)', '± (mg)', 'rasio S/N'];
-      const rows = cal.rows.slice().sort((a, b) => a.nominal_mg - b.nominal_mg || a.direction.localeCompare(b.direction));
-      el('calTable').innerHTML =
-        `<tr>${head.map(h => `<th>${h}</th>`).join('')}</tr>` +
-        rows.map(row => {
-          const snr = row.uncertainty_mg ? row.nominal_mg / row.uncertainty_mg : null;
-          const weak = snr !== null && snr < 10;
-          return `<tr>
-            <td>${formatMg(row.nominal_mg)}</td>
-            <td>${row.direction === 'U' ? 'naik' : 'turun'}</td>
-            <td>${num(row.net_counts, 2)}</td>
-            <td>${num(row.measured_mg, 3)}</td>
-            <td class="${Math.abs(row.residual_mg) > 5 * (row.uncertainty_mg || 1) ? 'warn' : ''}">${num(row.residual_mg, 3)}</td>
-            <td>${num(row.uncertainty_mg, 3)}</td>
-            <td class="${weak ? 'warn' : ''}">${snr === null ? '--' : snr.toFixed(1)}${weak ? ' (lemah)' : ''}</td>
-          </tr>`;
-        }).join('');
-
+      const tr = document.createElement('tr');
+      head.forEach(h => { const th = document.createElement('th'); th.textContent = h; tr.appendChild(th); });
+      table.appendChild(tr);
+      cal.rows.slice().sort((a, b) => a.nominal_mg - b.nominal_mg || a.direction.localeCompare(b.direction)).forEach(row => {
+        const snr = row.uncertainty_mg ? row.nominal_mg / row.uncertainty_mg : null;
+        const weak = snr !== null && snr < 10;
+        const cells = [formatMg(row.nominal_mg), row.direction === 'U' ? 'naik' : 'turun', num(row.net_counts, 2),
+          num(row.measured_mg, 3), num(row.residual_mg, 3), num(row.uncertainty_mg, 3),
+          snr === null ? '--' : `${snr.toFixed(1)}${weak ? ' (lemah)' : ''}`];
+        const r = document.createElement('tr');
+        cells.forEach((v, i) => {
+          const td = document.createElement('td'); td.textContent = v;
+          if ((i === 4 && Math.abs(row.residual_mg) > 5 * (row.uncertainty_mg || 1)) || (i === 6 && weak)) td.className = 'warn';
+          r.appendChild(td);
+        });
+        table.appendChild(r);
+      });
       el('calReportBox').hidden = false;
       el('calReport').textContent = cal.report;
     }
-
     async function refreshCalibration() {
-      try {
-        renderCalibration(await fetch('/api/calibration', { cache: 'no-store' }).then(r => r.json()));
-      } catch (error) { /* server sedang tidak merespons; biarkan tampilan lama */ }
+      try { renderCalibration(await fetch('/api/calibration', { cache: 'no-store' }).then(r => r.json())); }
+      catch (error) { /* server sedang tidak merespons */ }
     }
 
     updateCalButtons();
     refreshCalibration();
-    refresh(); setInterval(refresh, 500); setInterval(refreshCalibration, 3000);
+    refresh(); refreshCycle();
+    setInterval(refresh, 500);
+    setInterval(refreshCycle, 1000);
+    setInterval(refreshCalibration, 5000);
   </script>
 </body>
 </html>
