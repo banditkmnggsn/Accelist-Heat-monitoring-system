@@ -298,6 +298,14 @@ void checkRtdPlausibility() {
         logLine("           (T=%.2f C di luar %.0f..%.0f C)", tempC,
                 app::kRtdPlausibleMinC, app::kRtdPlausibleMaxC);
     }
+    // Saturasi tidak tertangkap cek di atas: nilai yang macet di plafon ADC
+    // tetap terlihat wajar. Rasio cip yang dilihat, bukan resistansinya,
+    // karena rasio tidak bergantung pada RTD_RREF.
+    if (rtd.ratio() > app::kRtdRatioWarn) {
+        logLine("  WARNING: RTD mendekati saturasi (rasio %.3f dari 1.000)", rtd.ratio());
+        logLine("           suhu maks terukur %.1f C; di atas itu angka suhu TIDAK benar",
+                rtd.maxMeasurableTempC());
+    }
 }
 
 void reportRtdHealth(bool ok) {
@@ -322,6 +330,8 @@ void reportRtdHealth(bool ok) {
     // Resistansi mentah selalu dicetak supaya salah RREF/jumper terlihat
     logLine("  RTD awal : R=%.2f ohm (kode %u/32768), T=%.2f C, fault 0x%02X",
             rtd.rtdResistance(), static_cast<unsigned>(rtd.rawCode()), rtd.tempC(), rtd.fault());
+    logLine("  RTD maks : %.1f C (plafon ADC dengan RREF %.1f ohm)", rtd.maxMeasurableTempC(),
+            RTD_RREF);
     // Tanpa syarat valid(): valid() mensyaratkan fault == 0, sehingga nilai
     // yang jelas tidak wajar justru lolos tanpa peringatan.
     if (rtd.spiOk()) {
@@ -601,7 +611,10 @@ void printHumanReport(uint32_t nowMs) {
         snprintf(weightText, sizeof(weightText), "W --- g %s (raw %" PRId32 ")",
                  loadCellStatusText(), loadCell.raw());
     } else {
-        snprintf(weightText, sizeof(weightText), "W %.3f g %s (raw %" PRId32 ")", grams,
+        // 4 desimal (0,1 mg) BUKAN klaim akurasi: noise satu baris jauh lebih
+        // besar. Digit ini supaya rata-rata ratusan baris di PC (siklus
+        // pengeringan) tidak terkunci ke grid 1 mg.
+        snprintf(weightText, sizeof(weightText), "W %.4f g %s (raw %" PRId32 ")", grams,
                  loadCellStatusText(), loadCell.raw());
     }
 
@@ -612,7 +625,7 @@ void printHumanReport(uint32_t nowMs) {
 
 void printCsvReport(uint32_t nowMs) {
     takeButtonChar();  // buang latch supaya tidak muncul basi saat kembali ke mode human
-    Serial.printf("%" PRIu32 ",%.2f,%.2f,%u,%" PRId32 ",%.3f,%d,%" PRId32 "\n", nowMs,
+    Serial.printf("%" PRIu32 ",%.2f,%.2f,%u,%" PRId32 ",%.4f,%d,%" PRId32 "\n", nowMs,
                   rtd.tempC(), rtd.rtdResistance(), static_cast<unsigned>(rtd.fault()),
                   loadCell.raw(), loadCell.grams(), loadCell.isStable() ? 1 : 0,
                   encoder.position());

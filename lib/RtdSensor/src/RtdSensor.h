@@ -104,6 +104,9 @@ public:
     uint16_t rawCode() const;        // kode RTD 15 bit terakhir
     uint16_t rawRegister() const;    // register RTD 16 bit mentah, termasuk D0
     float ratio() const;             // rawCode / 32768, besaran yang benar-benar diukur cip
+    // Suhu saat kode ADC mencapai skala penuh dengan RREF terpasang. Di atas
+    // ini cip saturasi dan suhu yang dilaporkan macet, tanpa fault apa pun.
+    float maxMeasurableTempC();
     float thresholdLowOhm() const;
     float thresholdHighOhm() const;
 

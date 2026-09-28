@@ -12,19 +12,20 @@ from urllib.parse import parse_qs, urlparse
 import serial
 
 import analysis
+from cycle import DryingCycle
 
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 WEB_PORT = int(os.environ.get("TUNING_WEB_PORT", "8080"))
-SERIAL_PORT = os.environ.get("TUNING_SERIAL_PORT", "COM6")
+SERIAL_PORT = os.environ.get("TUNING_SERIAL_PORT", "COM3")
 SERIAL_BAUD = 115200
 LOG_MAX = int(os.environ.get("TUNING_LOG_MAX", "20000"))
 
 REPORT_RE = re.compile(
     r"^\[\s*(?P<seconds>[0-9.]+)s\]\s+"
     r"RTD\s+(?P<temp>[-+0-9.]+)\s+C\s+\(R=(?P<ohm>[-+0-9.]+),\s+fault\s+0x(?P<fault>[0-9A-Fa-f]+)\)\s+\|\s+"
-    r"W\s+(?P<grams>[-+0-9.]+|---)\s+g\s+(?P<status>[A-Z]+)\s+\(raw\s+(?P<raw>-?[0-9]+)\)(?:\s+UNCAL)?\s+\|\s+"
+    r"W\s+(?P<grams>[-+0-9.]+|---)\s+g\s+(?P<status>[A-Z]+)\s+\(raw\s+(?P<raw>-?[0-9]+)\)(?P<uncal>\s+UNCAL)?\s+\|\s+"
     r"ENC\s+(?P<encoder>-?[0-9]+)\s+btn:(?P<button>.)$"
 )
 
@@ -135,6 +136,7 @@ class SerialState:
 
 state = SerialState()
 SESSION_CSV = DATA_DIR / f"calibration_{datetime.now():%Y%m%d_%H%M%S}.csv"
+drying_cycle = DryingCycle(DATA_DIR, state.send)
 
 
 def write_calibration_csv(points):
@@ -152,9 +154,14 @@ def write_calibration_csv(points):
             writer.writerow({column: point.get(column, "") for column in CSV_COLUMNS})
 
 
-def handle_line(line):
-    """Satu baris dari firmware. Dipisah dari loop serial supaya bisa diuji."""
+def handle_line(line, now=None):
+    """Satu baris dari firmware. Dipisah dari loop serial supaya bisa diuji.
+
+    `now` adalah detik monotonik PC; parameter ini hanya diisi oleh pengujian.
+    """
+    now = time.monotonic() if now is None else now
     calibration_changed = False
+    sample = None
     with state.lock:
         state.append_log(line)
 
@@ -193,11 +200,28 @@ def handle_line(line):
                 "rawCounts": int(values["raw"]),
                 "encoder": int(values["encoder"]),
                 "button": values["button"],
+                "uncal": values["uncal"] is not None,
             }
             state.last_data = time.time()
+            data = state._data
+            sample = {
+                "t": now,
+                "fw_seconds": data["seconds"],
+                "grams": data["grams"],
+                "raw": data["rawCounts"],
+                "status": data["status"],
+                "temp_c": data["tempC"],
+                "uncal": data["uncal"],
+            }
 
     if snapshot is not None:
         write_calibration_csv(snapshot)  # di luar lock: menulis berkas lambat
+
+    # Di luar state.lock: siklus memanggil state.send(), yang juga mengambil
+    # state.lock. Memanggilnya dari dalam lock di sini akan menyebabkan deadlock.
+    drying_cycle.on_log_line(line, now)
+    if sample is not None:
+        drying_cycle.feed(sample)
 
 
 def serial_worker():
@@ -256,13 +280,39 @@ class Handler(BaseHTTPRequestHandler):
                 write_calibration_csv([])
             self.send_bytes("text/csv; charset=utf-8", SESSION_CSV.read_bytes())
             return
+        if path == "/api/cycle":
+            body = json.dumps(drying_cycle.snapshot(time.monotonic())).encode("utf-8")
+            self.send_bytes("application/json; charset=utf-8", body)
+            return
+        if path.startswith("/api/cycle/files/"):
+            file_path = drying_cycle.file_path(path.rsplit("/", 1)[-1])
+            if file_path is None:
+                self.send_bytes("text/plain; charset=utf-8", b"Not found", 404)
+                return
+            kind = "application/json" if file_path.suffix == ".json" else "text/csv"
+            self.send_bytes(f"{kind}; charset=utf-8", file_path.read_bytes())
+            return
         if path in ("/", "/index.html"):
             self.send_bytes("text/html; charset=utf-8", (ROOT / "index.html").read_bytes())
             return
         self.send_bytes("text/plain; charset=utf-8", b"Not found", 404)
 
+    def read_json(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        return json.loads(self.rfile.read(length) or b"{}")
+
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/cycle":
+            try:
+                payload = self.read_json()
+                ok, message = drying_cycle.action(
+                    str(payload.get("action", "")), time.monotonic(), payload.get("settings"))
+            except (ValueError, TypeError, json.JSONDecodeError):
+                ok, message = False, "Permintaan tidak valid."
+            body = json.dumps({"ok": ok, "message": message}).encode("utf-8")
+            self.send_bytes("application/json; charset=utf-8", body, 200 if ok else 409)
+            return
         if path == "/api/calibration/clear":
             state.clear_calibration()
             write_calibration_csv([])

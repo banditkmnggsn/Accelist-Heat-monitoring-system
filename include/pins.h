@@ -47,7 +47,7 @@
 //  Kalau board MAX31865 pakai resistor referensi 400R, ganti RTD_RREF di
 //  sini saja (400.0f). Tidak ada file lain yang perlu diubah.
 // ---------------------------------------------------------------------
-constexpr float RTD_RREF     = 430.0f;  // nilai resistor referensi di board — VERIFIKASI dari sablon board
+constexpr float RTD_RREF     =  128.4f;  // nilai resistor referensi di board — VERIFIKASI dari sablon board
 constexpr float RTD_RNOMINAL = 100.0f;  // PT100
 
 // Mode kabel RTD. Pilihan: MAX31865_2WIRE, MAX31865_3WIRE, MAX31865_4WIRE.

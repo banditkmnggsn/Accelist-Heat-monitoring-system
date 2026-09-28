@@ -47,6 +47,10 @@ constexpr float kRtdPlausibleMaxC   = 250.0f;
 // melenceng setelah chamber panas atau sambungan melemah.
 constexpr uint32_t kRtdPlausibleCheckMs = 60000;
 
+// Rasio kode ADC RTD (0..1) di atas ini berarti mendekati saturasi. Nilai
+// yang macet di plafon tetap lolos cek rentang di atas, jadi dicek terpisah.
+constexpr float kRtdRatioWarn = 0.95f;
+
 // ---------------------------------------------------------------------
 //  Initial zero setting: tare otomatis saat alat nyala, seperti timbangan.
 //

@@ -238,5 +238,8 @@ uint8_t RtdSensor::liveConfigRegister() { return readConfig(); }
 uint16_t RtdSensor::rawCode() const { return rawCode_; }
 uint16_t RtdSensor::rawRegister() const { return rawRegister_; }
 float RtdSensor::ratio() const { return static_cast<float>(rawCode_) / kAdcFullScale; }
+float RtdSensor::maxMeasurableTempC() {
+    return max_.calculateTemperature(kAdcMaxCode, cfg_.rnominalOhm, cfg_.rrefOhm);
+}
 float RtdSensor::thresholdLowOhm() const { return kFaultLowRatio * cfg_.rnominalOhm; }
 float RtdSensor::thresholdHighOhm() const { return kFaultHighRatio * cfg_.rnominalOhm; }
