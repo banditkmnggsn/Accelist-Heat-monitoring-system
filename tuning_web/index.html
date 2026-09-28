@@ -247,6 +247,9 @@
             <h2>Kalibrasi multi-titik</h2>
             <span class="status" id="calState">nol belum direkam</span>
           </div>
+          <p class="status">Waktu tunggu sebelum merekam
+            <input type="number" id="calWait" value="30" min="0" max="300" step="5" style="width:70px"> detik
+            &mdash; sama untuk setiap titik dan nol, supaya creep yang ikut terukur selalu sama besar.</p>
           <ol class="steps">
             <li>
               <b>Kosongkan timbangan</b>, lalu <button id="calZero">Rekam NOL</button>
@@ -274,6 +277,7 @@
             <button id="calClear">Hapus semua titik</button>
           </div>
           <div id="calFit" class="status" style="margin-top:14px">Belum ada titik.</div>
+          <div id="calRepeat" class="status" style="margin-top:8px"></div>
           <div style="overflow:auto"><table id="calTable"></table></div>
           <details id="calReportBox" hidden>
             <summary>Ringkasan siap tempel ke laporan</summary>
@@ -667,6 +671,7 @@
       });
     }
 
+    let clipCounter = 0;
     // Kerangka satu grafik: sumbu, grid rambut, garis referensi berlabel.
     function frame(host, width, height, xDomain, yDomain, yLog, yFormat, xLabel) {
       const m = { l: 62, r: 14, t: 10, b: 34 };
@@ -690,7 +695,11 @@
       svg('line', { x1: m.l, x2: m.l + pw, y1: m.t + ph, y2: m.t + ph, stroke: axis, 'stroke-width': 1 }, root);
       text(m.l + pw, m.t + ph + 30, xLabel, 'end');
 
-      const plot = svg('g', {}, root);
+      // Garis ekstrapolasi bisa jauh melewati rentang sumbu; potong di area plot.
+      const clipId = `clip${++clipCounter}`;
+      const clip = svg('clipPath', { id: clipId }, svg('defs', {}, root));
+      svg('rect', { x: m.l, y: m.t - 4, width: pw, height: ph + 8 }, clip);
+      const plot = svg('g', { 'clip-path': `url(#${clipId})` }, root);
       const refX = (t, label) => {
         if (t < xDomain[0] || t > xDomain[1]) return;
         svg('line', { x1: x(t), x2: x(t), y1: m.t, y2: m.t + ph, stroke: muted, 'stroke-width': 1, 'stroke-dasharray': '3 4' }, root);
@@ -880,8 +889,17 @@
       drawMass(cycle);
       drawRate(cycle);
     }
-    let resizeTimer = null;
-    new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawCharts, 120); }).observe(el('cyclePanel'));
+    // Gambar ulang hanya saat LEBAR berubah. Tinggi panel berubah tiap kali teks
+    // statistik berganti; menggambar ulang karena itu akan menutup tooltip yang
+    // sedang dibaca.
+    let resizeTimer = null, drawnWidth = 0;
+    new ResizeObserver(entries => {
+      const width = Math.round(entries[0].contentRect.width);
+      if (width === drawnWidth) return;
+      drawnWidth = width;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(drawCharts, 120);
+    }).observe(el('chartMass'));
 
     // =========================================================================
     //  Kalibrasi multi-titik (perawatan)
@@ -914,13 +932,19 @@
       el('calPoint').disabled = busy || chosenMg() === null;
       el('calZero').disabled = busy;
     }
+    // Tunggu yang SAMA sebelum setiap rekaman. Creep sesaat setelah beban
+    // diletakkan puluhan mg/menit; kalau jedanya berbeda-beda, creep yang ikut
+    // terukur juga berbeda, dan itu muncul sebagai repeatability yang buruk.
     function startMeasurement(command) {
-      busyUntil = Date.now() + 7500;
+      const waitMs = Math.max(0, Number(el('calWait').value) || 0) * 1000;
+      const sendAt = Date.now() + waitMs;
+      busyUntil = sendAt + 7500;
       updateCalButtons();
-      sendCommand(command);
+      setTimeout(() => sendCommand(command), waitMs);
       const tick = setInterval(() => {
-        const left = Math.ceil((busyUntil - Date.now()) / 1000);
-        if (left > 0) el('calState').textContent = `mengukur 64 sampel... ${left} s`;
+        const now = Date.now();
+        if (now < sendAt) el('calState').textContent = `menunggu creep mereda... ${Math.ceil((sendAt - now) / 1000)} s (jangan sentuh)`;
+        else if (now < busyUntil) el('calState').textContent = `mengukur 64 sampel... ${Math.ceil((busyUntil - now) / 1000)} s`;
         else { clearInterval(tick); updateCalButtons(); refreshCalibration(); }
       }, 250);
     }
@@ -947,7 +971,32 @@
       sendCommand(`s ${fittedCountsPerGram.toFixed(3)}`);
     };
 
+    function renderRepeatability(cal) {
+      const box = el('calRepeat');
+      box.replaceChildren();
+      const groups = (cal.repeatability || []).filter(g => g.n >= 2);
+      if (!groups.length) return;
+      const nominals = new Set((cal.repeatability || []).map(g => g.nominal_mg));
+      if (nominals.size === 1) {
+        const p = document.createElement('p');
+        p.textContent = 'Semua titik di satu nominal: ini mengukur REPEATABILITY, bukan akurasi. Garis kalibrasi butuh ' +
+          'minimal dua nominal berbeda, dan span ditetapkan oleh beban terbesar.';
+        box.appendChild(p);
+      }
+      groups.forEach(g => {
+        const p = document.createElement('p');
+        const ratio = g.expected_sd_counts ? g.sd_counts / g.expected_sd_counts : null;
+        p.textContent = `${formatMg(g.nominal_mg)} (${g.direction === 'U' ? 'naik' : 'turun'}), ${g.n} kali: ` +
+          `repeatability SD ${num(g.sd_mg, 2)} mg · countsPerGram ${num(g.counts_per_gram, 1)} ` +
+          `(rentang ${num(g.cpg_min, 0)}..${num(g.cpg_max, 0)}) · noise elektronik menjelaskan ` +
+          `${num(g.expected_sd_counts, 1)} dari ${num(g.sd_counts, 1)} count` +
+          (ratio && ratio > 2 ? ` — ${ratio.toFixed(1)}x lebih besar: penyebabnya mekanis (posisi beban / waktu tunggu).` : '.');
+        box.appendChild(p);
+      });
+    }
+
     function renderCalibration(cal) {
+      renderRepeatability(cal);
       el('calState').textContent = cal.pendingZero === null
         ? 'nol belum direkam — mulai dari langkah 1'
         : `nol terakhir ${cal.pendingZero.toFixed(2)} count | ${cal.points.length} titik terekam`;

@@ -123,6 +123,7 @@ class SerialState:
             "fit": fit,
             "metrics": stats,
             "report": analysis.report_text(fit, stats, rows),
+            "repeatability": analysis.repeatability_summary(points),
             "pendingZero": self.pending_zero,
         }
 

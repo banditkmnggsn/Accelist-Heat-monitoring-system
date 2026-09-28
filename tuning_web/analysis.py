@@ -111,6 +111,46 @@ def _stdev(values):
     return math.sqrt(sum((v - mean) ** 2 for v in values) / (len(values) - 1))
 
 
+def repeatability_summary(points):
+    """Sebaran antar pengulangan per nominal, tanpa perlu fit garis.
+
+    Titik-titik pada SATU nominal tidak bisa menghasilkan garis kalibrasi,
+    tetapi tetap menjawab pertanyaan penting: seberapa sama hasilnya kalau
+    beban yang sama diletakkan berulang kali. `expected_sd_counts` adalah
+    perkiraan sebaran yang bisa dijelaskan noise elektronik saja (rata-rata
+    64 sampel titik ditambah nol acuannya); kalau sebaran teramati jauh lebih
+    besar, penyebabnya mekanis — posisi beban di wadah atau creep yang
+    berbeda karena waktu tunggu yang berbeda.
+    """
+    groups = {}
+    for point in usable_points(points):
+        groups.setdefault((point["nominal_mg"], point["direction"]), []).append(point)
+    out = []
+    for (nominal, direction), group in sorted(groups.items()):
+        nets = [net_counts(p) for p in group]
+        mean = sum(nets) / len(nets)
+        cpg = mean / nominal * 1000.0 if nominal else None
+        expected = []
+        for p in group:
+            point_se = p["raw_sd"] / math.sqrt(p["samples"])
+            zero_share = 0.5 if p.get("zero_before") is not None and p.get("zero_after") is not None else 1.0
+            expected.append(point_se * math.sqrt(1.0 + zero_share))
+        spread = _stdev(nets)
+        out.append({
+            "nominal_mg": nominal,
+            "direction": direction,
+            "n": len(nets),
+            "mean_net_counts": mean,
+            "counts_per_gram": cpg,
+            "cpg_min": min(nets) / nominal * 1000.0 if nominal else None,
+            "cpg_max": max(nets) / nominal * 1000.0 if nominal else None,
+            "sd_counts": spread,
+            "sd_mg": None if spread is None or not cpg else spread / cpg * 1000.0,
+            "expected_sd_counts": sum(expected) / len(expected),
+        })
+    return out
+
+
 def metrics(points, fit):
     if fit is None:
         return None
