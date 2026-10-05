@@ -1,0 +1,10 @@
+{
+  "name": "HeatboxCycle",
+  "version": "0.1.0",
+  "description": "Logika siklus pengeringan Heat Box di firmware: nilai per menit, laju penyusutan, fit kurva eksponensial, prediksi waktu stop. C++ murni tanpa Arduino.h supaya bisa diuji di PC",
+  "keywords": ["heatbox", "drying", "moisture", "curve fit"],
+  "license": "MIT",
+  "authors": [{ "name": "Heatbox Project" }],
+  "frameworks": "*",
+  "platforms": "*"
+}

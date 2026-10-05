@@ -10,6 +10,32 @@ pio test -e native -f test_math_fit   # satu suite saja
 pio test -e native -v                 # verbose, tampilkan tiap assertion
 ```
 
+## Suite `test_drying_math` (lib/HeatboxCycle)
+
+Menguji port C++ matematika siklus pengeringan (`lib/HeatboxCycle/src/DryingMath.*`)
+terhadap **vektor emas** yang dihitung oleh `tuning_web/drying.py`, implementasi yang
+sudah teruji di siklus PC. Lolos berarti firmware memberi angka yang sama dengan Python.
+
+```bash
+python test/test_drying_math/gen_golden.py   # hanya kalau drying.py / kasus uji berubah
+pio test -e native -f test_drying_math       # butuh gcc di PATH
+```
+
+Mesin pengembangan saat ini tidak punya gcc, tetapi punya MSVC 2019 Build Tools. Dari
+"x64 Native Tools Command Prompt for VS 2019" di root proyek (Unity diambil dari
+`.pio\libdeps\native`, yang sudah terpasang; hasil build masuk `.pio\msvc`):
+
+```bat
+mkdir .pio\msvc 2>nul
+cl /nologo /std:c++14 /W4 /WX /EHsc /D_CRT_SECURE_NO_WARNINGS ^
+   /I lib\HeatboxCycle\src /I .pio\libdeps\native\Unity\src ^
+   test\test_drying_math\test_drying_math.cpp lib\HeatboxCycle\src\DryingMath.cpp ^
+   .pio\libdeps\native\Unity\src\unity.c /Fo.pio\msvc\ /Fe.pio\msvc\test_drying_math.exe
+.pio\msvc\test_drying_math.exe
+```
+
+Suite ini tidak bergantung pada `lib/Heatbox` maupun dua prasyarat di bawah.
+
 ## Struktur
 
 Tiap folder `test_*/` adalah **program terpisah** dengan `main()` sendiri.

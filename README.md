@@ -50,6 +50,8 @@ Heatbox/
 │   ├── EncoderInput/          <- encoder EC11 polling
 │   │   ├── library.json
 │   │   └── src/EncoderInput.h, EncoderInput.cpp
+│   ├── HeatboxCycle/          <- siklus pengeringan di firmware (dalam pengerjaan, belum dipakai main.cpp)
+│   │   └── src/DryingMath.*   <- port drying.py: nilai per menit, laju, fit, prediksi stop
 │   └── Heatbox/               <- (lama) algoritma pengeringan fase berikutnya, tidak dipakai
 ├── src/
 │   ├── main.cpp               <- setup, loop, report serial, command serial
