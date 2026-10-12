@@ -105,9 +105,13 @@ public:
     // panjang sangat menolong: pada SD raw 29.9 count, 16 sampel memberi
     // 1.37 mg sementara 128 sampel memberi 0.49 mg.
     //
-    // Window dimulai pendek lalu tumbuh 1 sampel per konversi sampai maksimum,
-    // dan dipendekkan kembali begitu terdeteksi perubahan beban nyata, supaya
-    // respons tetap cepat saat beban berubah tetapi tenang saat diam.
+    // Window tumbuh 1 sampel per konversi sampai maksimum. Begitu terdeteksi
+    // perubahan beban nyata, rata-rata DIMULAI ULANG dari sampel itu: tidak
+    // boleh ada sampel sebelum perubahan yang tertinggal di window, karena
+    // sisa itu membuat angka meluruh pelan selama belasan detik.
+    //
+    // kAverageMin adalah rata-rata TETAP untuk deteksi stabil dan SD window,
+    // bukan batas bawah window adaptif.
     static constexpr uint8_t kAverageMin = 16;
     static constexpr uint8_t kAverageMax = 128;
     static constexpr float kStepSigma = 6.0f;  // ambang "beban benar-benar berubah"
@@ -162,6 +166,9 @@ public:
     bool hasNewSample();
 
     int32_t raw() const;    // raw count terakhir, belum difilter
+    // Sampel terakhir SETELAH gerbang spike (spike diganti median-of-5),
+    // sebelum rata-rata. Inilah masukan nilai per detik siklus pengeringan.
+    int32_t accepted() const;
     float grams() const;    // (moving average - offset) / countsPerGram, NAN kalau belum ada data
 
     void tare();                           // rata-rata kTareSamples sampel -> offset (background)
@@ -260,6 +267,7 @@ private:
 
     // data & filter
     int32_t raw_ = 0;
+    int32_t accepted_ = 0;
     bool clipped_ = false;
     bool newSample_ = false;
     int32_t medianBuf_[kMedianSize] = {};
@@ -280,6 +288,9 @@ private:
     // rawStdDev_ tidak bisa dipakai untuk deteksi step karena step itu sendiri
     // melonjakkan SD-nya, sehingga ambang jadi lebih besar dari step-nya.
     float quietStdDev_ = NAN;
+    // Sampel berturut-turut tanpa step maupun spike (jenuh di kRawRingSize).
+    // quietStdDev_ hanya diperbarui kalau seluruh ring raw bersih.
+    uint8_t cleanSamples_ = 0;
     int32_t rawPeakToPeak_ = 0;
     uint32_t spikesRejected_ = 0;
     bool stableLatched_ = false;

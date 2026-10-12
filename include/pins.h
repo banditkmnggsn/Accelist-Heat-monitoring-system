@@ -44,10 +44,16 @@
 
 // ---------------------------------------------------------------------
 //  Konstanta hardware RTD
-//  Kalau board MAX31865 pakai resistor referensi 400R, ganti RTD_RREF di
-//  sini saja (400.0f). Tidak ada file lain yang perlu diubah.
+//  RTD_RREF = nilai SEBENARNYA resistor referensi di board (nominal 430
+//  ohm, kode 431). Tuning 12 Okt 2026 dengan multimeter sebagai acuan:
+//    probe merah-biru 110,8 ohm - pasangan merah 0,9 ohm = 109,9 ohm
+//    (3-wire membuang hambatan kabel), rasio cip 0,2595 -> 423,5 ohm;
+//    cocok dengan resistor terukur langsung 423,12 ohm.
+//  JANGAN diubah untuk menutupi bacaan yang salah: kalau rasio cip tidak
+//  cocok dengan PT100, penyebabnya pengawatan atau jumper 2/3/4-wire
+//  (perintah 'x' menampilkan cek kewajarannya). Ubah hanya dari acuan fisik.
 // ---------------------------------------------------------------------
-constexpr float RTD_RREF     =  128.4f;  // nilai resistor referensi di board — VERIFIKASI dari sablon board
+constexpr float RTD_RREF     = 423.5f;
 constexpr float RTD_RNOMINAL = 100.0f;  // PT100
 
 // Mode kabel RTD. Pilihan: MAX31865_2WIRE, MAX31865_3WIRE, MAX31865_4WIRE.

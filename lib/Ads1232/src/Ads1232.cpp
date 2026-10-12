@@ -332,10 +332,10 @@ void Ads1232::updateRawStats(int32_t value) {
 }
 
 // ---------------------------------------------------------------------
-//  Filter: gerbang spike -> moving average 16
+//  Filter: gerbang spike -> rata-rata adaptif
 //
-//  Sampel masuk apa adanya ke averager supaya rata-rata 16 sampel benar-
-//  benar memberi pengurangan noise sqrt(16). Median-of-5 hanya dipakai
+//  Sampel masuk apa adanya ke averager supaya rata-rata N sampel benar-
+//  benar memberi pengurangan noise sqrt(N). Median-of-5 hanya dipakai
 //  sebagai pengganti kalau sampel menyimpang > kSpikeGateSigma dari noise
 //  raw yang terukur.
 // ---------------------------------------------------------------------
@@ -353,13 +353,16 @@ void Ads1232::processSample(int32_t value) {
     updateRawStats(value);
 
     int32_t accepted = value;
+    bool spike = false;
     if (std::isnan(rawStdDev_)) {
         accepted = median;  // dasar noise belum diketahui: pakai perilaku konservatif
     } else if (std::fabs(static_cast<double>(value) - static_cast<double>(median)) >
                static_cast<double>(kSpikeGateSigma) * static_cast<double>(rawStdDev_)) {
         accepted = median;
         ++spikesRejected_;
+        spike = true;
     }
+    accepted_ = accepted;
 
     avgBuf_[avgIdx_] = accepted;
     avgIdx_ = static_cast<uint8_t>((avgIdx_ + 1) % kAverageMax);
@@ -367,22 +370,31 @@ void Ads1232::processSample(int32_t value) {
         ++avgFill_;
     }
 
-    // Window dipendekkan hanya kalau median (tahan spike, tapi ikut
-    // perubahan bertahan) menyimpang jauh dari keluaran sekarang. Ambangnya
-    // memakai quietStdDev_, BUKAN rawStdDev_: saat beban berubah, step itu
-    // sendiri melonjakkan rawStdDev_ sampai ambangnya melebihi step-nya,
-    // sehingga reset tertunda sepanjang ring raw (6,4 s).
+    // Perubahan beban = median (tahan spike, tapi ikut perubahan bertahan)
+    // menyimpang jauh dari keluaran sekarang. Ambangnya memakai
+    // quietStdDev_, BUKAN rawStdDev_: step itu sendiri melonjakkan
+    // rawStdDev_ sampai ambangnya melebihi step-nya.
     const bool loadChanged = !std::isnan(filtered_) && !std::isnan(quietStdDev_) &&
                              std::fabs(static_cast<double>(median) - filtered_) >
                                  static_cast<double>(kStepSigma) * static_cast<double>(quietStdDev_);
 
-    if (!std::isnan(rawStdDev_) && !loadChanged) {
+    // quietStdDev_ hanya diperbarui dari ring raw yang BERSIH (tanpa step
+    // atau spike di 64 sampel terakhir). Dulu ia ikut menyerap rawStdDev_
+    // yang memuat step: terukur membengkak dari ~22 ke ~16 000 count setelah
+    // beban 10 g diletakkan, sehingga pengangkatan beban beberapa detik
+    // kemudian (55 000 count) tidak terdeteksi sama sekali.
+    if (loadChanged || spike) {
+        cleanSamples_ = 0;
+    } else if (cleanSamples_ < kRawRingSize) {
+        ++cleanSamples_;
+    }
+    if (!std::isnan(rawStdDev_) && cleanSamples_ >= kRawRingSize) {
         quietStdDev_ = std::isnan(quietStdDev_) ? rawStdDev_
                                                 : 0.9f * quietStdDev_ + 0.1f * rawStdDev_;
     }
 
     if (loadChanged) {
-        avgWindow_ = kAverageMin;
+        avgWindow_ = 1;  // mulai ulang: hanya sampel sesudah perubahan yang dirata-rata
     } else if (avgWindow_ < kAverageMax) {
         ++avgWindow_;
     }
@@ -517,6 +529,7 @@ void Ads1232::resetFilters() {
     stableSpan_ = NAN;
     stableLatched_ = false;
     quietStdDev_ = NAN;
+    cleanSamples_ = 0;
     clipped_ = false;
     newSample_ = false;
 }
@@ -743,6 +756,7 @@ bool Ads1232::hasNewSample() {
 }
 
 int32_t Ads1232::raw() const { return raw_; }
+int32_t Ads1232::accepted() const { return accepted_; }
 
 float Ads1232::grams() const {
     if (std::isnan(filtered_)) {

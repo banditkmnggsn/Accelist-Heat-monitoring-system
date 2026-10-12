@@ -43,6 +43,11 @@ constexpr float kRtdPlausibleMaxOhm = 200.0f;
 constexpr float kRtdPlausibleMinC   = -50.0f;
 constexpr float kRtdPlausibleMaxC   = 250.0f;
 
+// Nilai resistor referensi FISIK di board MAX31865 (kode 431 = 430 ohm).
+// Dipakai panel diagnostik 'x' untuk cek kewajaran yang tidak bergantung
+// pada RTD_RREF di pins.h (yang sementara berisi faktor koreksi).
+constexpr float kRtdRrefPhysicalOhm = 430.0f;
+
 // Ulangi plausibility check berkala, bukan hanya saat boot: nilai bisa
 // melenceng setelah chamber panas atau sambungan melemah.
 constexpr uint32_t kRtdPlausibleCheckMs = 60000;

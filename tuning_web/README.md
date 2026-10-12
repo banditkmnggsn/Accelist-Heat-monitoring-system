@@ -1,12 +1,14 @@
 # Heat Box — dasbor PC
 
-Web lokal yang membaca report firmware dari ESP32 lewat serial (`115200` baud), menjalankan
-siklus pengeringan sampel, dan menyimpan datanya. Semua perhitungan ada di sini; ESP32
-hanya mengirim baris teks dan tidak membutuhkan Wi-Fi.
+Web lokal yang membaca report firmware dari ESP32 lewat serial (`115200` baud): pemantauan,
+perintah perawatan, kalibrasi multi-titik, dan siklus pengeringan **versi PC**. ESP32 tidak
+membutuhkan Wi-Fi.
 
-Awalnya folder ini alat tuning sementara. Sejak siklus pengeringan ditambahkan, ia menjadi
-antarmuka utama alat — **jangan dihapus**. Rincian desain, bukti, dan keterbatasannya ada di
-[CATATAN-SIKLUS-PENGERINGAN.md](../CATATAN-SIKLUS-PENGERINGAN.md).
+**Masa transisi:** sesuai [RANCANGAN-SIKLUS-PENGERINGAN.md](../RANCANGAN-SIKLUS-PENGERINGAN.md),
+siklus akan pindah ke firmware dan alat berdiri sendiri dengan LCD. Setelah itu dasbor ini
+dipakai untuk kalibrasi, melihat estimasi waktu stop, dan mengambil log. Panel siklus PC
+dipensiunkan, tetapi `drying.py` dan `cycle.py` tetap disimpan sebagai implementasi acuan
+untuk menguji firmware — **jangan dihapus**.
 
 ## Menjalankan
 
@@ -39,7 +41,10 @@ meng-upload firmware.
 
 Uji: `cd tuning_web` lalu `python -m unittest test_cycle -v`.
 
-## Panel "Siklus sampel"
+## Panel "Siklus sampel" (versi PC, akan dipensiunkan)
+
+Ambang di panel ini (10 dan 0,1 mg/menit) adalah versi lama. Siklus firmware memakai 4 dan
+1 mg/menit (lihat rancangan).
 
 Alur: **Mulai siklus** → tunggu drift nol kecil → **Tare wadah kosong** → masukkan
 sampel → **Mulai pemanas** → titik tiap menit → cut-off otomatis saat laju < 10 mg/menit

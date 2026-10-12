@@ -14,7 +14,9 @@
 
 #include <Ads1232.h>
 #include <EncoderInput.h>
+#include <MinuteBuilder.h>
 #include <RtdSensor.h>
+#include <SecondAggregator.h>
 
 #include <cctype>
 #include <cinttypes>
@@ -22,6 +24,7 @@
 #include <cstdarg>
 #include <cstdlib>
 
+#include "HardwareSensors.h"
 #include "app_config.h"
 #include "pins.h"
 
@@ -34,6 +37,13 @@ constexpr const char* kCsvHeader = "millis,tempC,rtdOhm,rtdFault,rawCounts,grams
 RtdSensor rtd({PIN_MAX_CS, PIN_MAX_SCK, PIN_MAX_MISO, PIN_MAX_MOSI, RTD_WIRES, RTD_RREF, RTD_RNOMINAL});
 Ads1232 loadCell({PIN_ADS_SCLK, PIN_ADS_DOUT, PIN_ADS_PDWN});
 EncoderInput encoder({PIN_ENC_A, PIN_ENC_B, PIN_ENC_SW});
+HardwareSensors sensors(loadCell, rtd);
+
+// Pengolahan siklus pengeringan (RANCANGAN-SIKLUS-PENGERINGAN.md §5).
+// Untuk sementara hanya mencetak baris MNT tiap menit sejak boot, supaya
+// nilai per menit hasil firmware bisa dibandingkan dengan pengolahan di PC.
+hbcycle::SecondAggregator secondAggregator;
+hbcycle::MinuteBuilder minuteBuilder;
 
 // Kalibrasi multi-titik: firmware hanya MENGUKUR dan MENCETAK. Penyimpanan,
 // fit, dan metrik dikerjakan di PC (tuning_web), sesuai arsitektur proyek.
@@ -96,10 +106,10 @@ void printBanner() {
     Serial.printf(" RTD     : PT%.0f %s, RNOMINAL=%.1f ohm, RREF=%.1f ohm, filter 50 Hz, %" PRIu32 " ms/sampel\n",
                   RTD_RNOMINAL, wireModeText(), RTD_RNOMINAL, RTD_RREF, RtdSensor::kSamplePeriodMs);
     Serial.println(" ADS1232 : asumsi jumper GAIN=128, SPEED=10 SPS, A0=GND (AIN1)");
-    Serial.printf("           gerbang spike %.0f sigma (median-%u) -> rata-rata adaptif %u..%u sampel\n",
+    Serial.printf("           gerbang spike %.0f sigma (median-%u) -> rata-rata adaptif s.d. %u sampel\n",
                   Ads1232::kSpikeGateSigma, static_cast<unsigned>(Ads1232::kMedianSize),
-                  static_cast<unsigned>(Ads1232::kAverageMin),
                   static_cast<unsigned>(Ads1232::kAverageMax));
+    Serial.println("           (rata-rata dimulai ulang saat beban berubah)");
     Serial.printf("           STABLE jika angka bergerak < %.1f mg selama %u sampel (%.1f s)\n",
                   Ads1232::kStableSpanMg, static_cast<unsigned>(Ads1232::kStableWindow),
                   samplesToSeconds(Ads1232::kStableWindow));
@@ -226,19 +236,25 @@ void printRtdPanel() {
             RTD_RREF);
     logLine("  suhu                = %.2f C", rtd.tempC());
 
-    // Rasio tidak bergantung pada RREF. Jadi kalau resistansi probe sudah
-    // diukur multimeter, nilai RREF yang SEHARUSNYA terpasang bisa dihitung.
+    // Rasio tidak bergantung pada RTD_RREF, jadi dari rasio dan resistor
+    // referensi FISIK terlihat resistansi probe yang benar-benar dilihat cip.
+    // Dulu panel ini menyarankan mengganti RTD_RREF agar angkanya cocok;
+    // saran itu salah dan menghasilkan faktor koreksi yang membuat cip
+    // saturasi jauh di bawah suhu kerja.
     if (measured > 0.0f) {
-        logLine("  --- petunjuk RREF ---");
-        logLine("  rasio = R_probe / R_ref_asli, tidak terpengaruh RTD_RREF.");
-        logLine("  Kalau probe terukur X ohm di multimeter, maka R_ref_asli = X / %.6f:", measured);
-        const float samples[] = {100.0f, 108.0f, 110.0f};
-        for (float probe : samples) {
-            logLine("    probe %.0f ohm  ->  R_ref_asli ~ %.1f ohm", probe, probe / measured);
+        const float seenOhm = measured * app::kRtdRrefPhysicalOhm;
+        logLine("  --- cek kewajaran (tidak terpengaruh RTD_RREF) ---");
+        logLine("  dengan resistor referensi fisik %.0f ohm, cip melihat probe %.1f ohm",
+                app::kRtdRrefPhysicalOhm, seenOhm);
+        logLine("  PT100 0..150 C = 100..157 ohm -> rasio seharusnya %.3f..%.3f",
+                100.0f / app::kRtdRrefPhysicalOhm, 157.3f / app::kRtdRrefPhysicalOhm);
+        if (seenOhm < app::kRtdPlausibleMinOhm || seenOhm > app::kRtdPlausibleMaxOhm) {
+            logLine("  !! Di luar rentang PT100. Kalau resistor referensi terukur ~%.0f ohm,",
+                    app::kRtdRrefPhysicalOhm);
+            logLine("  !! penyebabnya pengawatan / jumper 2-3-4 wire, BUKAN nilai RTD_RREF.");
+            logLine("  !! Jangan ditutupi dengan mengubah RTD_RREF: dengan %.1f ohm cip", RTD_RREF);
+            logLine("  !! saturasi di %.1f C.", rtd.maxMeasurableTempC());
         }
-        logLine("  Ukur resistor referensi di board. Kalau BUKAN %.0f ohm, itu penyebabnya,",
-                RTD_RREF);
-        logLine("  dan RTD_RREF di pins.h harus diganti ke nilai terukur itu.");
     }
 
     logLine("  config register     = 0x%02X", config);
@@ -277,8 +293,8 @@ void printRtdPanel() {
         Serial.println();
         logLine("  !! Perbaiki pengawatan dulu; nilai resistansi di atas tidak bisa dipercaya.");
     } else {
-        logLine("  Siklus fault bersih: RTD, REFIN-, dan RTDIN- tersambung.");
-        logLine("  Berarti error bukan kabel terputus, melainkan NILAI referensi.");
+        logLine("  Siklus fault bersih: tidak ada kabel RTD / REFIN- / RTDIN- yang putus.");
+        logLine("  Rasio yang salah tetap bisa berasal dari jumper 2/3/4-wire atau urutan kabel.");
     }
 }
 
@@ -421,6 +437,47 @@ void printMeasureResult() {
                   pendingDirection, loadCell.measureMean(), loadCell.measureSd(),
                   static_cast<unsigned>(loadCell.measureSamples()), rtd.rtdResistance(),
                   rtd.tempC());
+}
+
+// =====================================================================
+//  Nilai per detik -> per menit (siklus pengeringan, langkah 2)
+//
+//  Baris MNT sengaja TIDAK diawali "# " (sama seperti CALZERO/CALPT)
+//  supaya bisa di-parse di PC:
+//    MNT,<menit>,<massa_mg>,<kemiringan_mg_per_menit>,<sebaran_mg>,
+//        <ketidakpastian_mg>,<detik_dipakai>,<detik_sah>,<sah 1|0>
+//  Massa relatif terhadap offset tare tersimpan, jadi menit yang memuat
+//  tare tidak berarti.
+// =====================================================================
+double rawToMg(double raw) {
+    return (raw - loadCell.offsetCounts()) / static_cast<double>(loadCell.countsPerGram()) * 1000.0;
+}
+
+void printMinute(const hbcycle::MinuteRecord& minute) {
+    Serial.printf("MNT,%" PRIu32 ",%.3f,%.3f,%.3f,%.3f,%u,%u,%d\n", minute.index, minute.massMg,
+                  minute.slopeMgPerMin, minute.spreadMg, minute.uncertaintyMg,
+                  static_cast<unsigned>(minute.secondsUsed),
+                  static_cast<unsigned>(minute.secondsValid), minute.valid ? 1 : 0);
+}
+
+void serviceAggregation() {
+    // Sampel diambil lebih dulu, lalu detik yang sudah lewat ditutup sampai
+    // waktu sampel itu. Urutan ini menjamin sampel masuk ke detiknya sendiri.
+    hbcycle::MassSample sample;
+    const bool fresh = sensors.takeMassSample(sample);
+    const uint32_t nowMs = fresh ? sample.ms : sensors.nowMs();
+
+    hbcycle::SecondRecord second;
+    hbcycle::MinuteRecord minute;
+    while (secondAggregator.poll(nowMs, second)) {
+        const double massMg = second.valid ? rawToMg(second.rawMean) : NAN;
+        if (minuteBuilder.add(second, massMg, minute)) {
+            printMinute(minute);
+        }
+    }
+    if (fresh) {
+        secondAggregator.addSample(sample.ms, sample.raw, sample.ok);
+    }
 }
 
 // =====================================================================
@@ -881,6 +938,9 @@ void setup() {
 
     printBanner();
     runHealthCheck();
+    secondAggregator.reset(sensors.nowMs());
+    minuteBuilder.reset();
+    logLine("Nilai per menit aktif: baris MNT tiap 60 detik sejak boot");
     printHelp();
 
     lastReportMs = millis();
@@ -891,6 +951,7 @@ void loop() {
     loadCell.update();
     encoder.update();
     latchButtonEvent();
+    serviceAggregation();
 
     pollSerialCommands();
 

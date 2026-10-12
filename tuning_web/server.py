@@ -18,7 +18,9 @@ from cycle import DryingCycle
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 WEB_PORT = int(os.environ.get("TUNING_WEB_PORT", "8080"))
-SERIAL_PORT = os.environ.get("TUNING_SERIAL_PORT", "COM3")
+# strip(): `set TUNING_SERIAL_PORT=COM6 && ...` di cmd ikut membawa spasi, dan
+# 'COM6 ' gagal dibuka saat menyambung ulang.
+SERIAL_PORT = os.environ.get("TUNING_SERIAL_PORT", "COM6").strip()
 SERIAL_BAUD = 115200
 LOG_MAX = int(os.environ.get("TUNING_LOG_MAX", "20000"))
 
