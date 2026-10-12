@@ -26,6 +26,9 @@ public:
         max31865_numwires_t wires;
         float rrefOhm;
         float rnominalOhm;
+        // Koreksi tetap yang ditambahkan ke suhu hasil kurva PT100.
+        // Resistansi yang dilaporkan tetap nilai terukur, tanpa koreksi.
+        float offsetC;
     };
 
     // -----------------------------------------------------------------

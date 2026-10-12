@@ -38,7 +38,7 @@ Default). Rinciannya ada di [RANCANGAN-SIKLUS-PENGERINGAN.md](RANCANGAN-SIKLUS-P
 | Bagian | Status |
 |---|---|
 | Driver load cell, suhu, encoder | ✅ jalan, load cell sudah terkarakterisasi |
-| Sensor suhu PT100 | ✅ pengawatan 3-wire benar, RREF di-tuning dengan multimeter ([spesifikasi §8.1](SPESIFIKASI-TEKNIS.md)) |
+| Sensor suhu PT100 | ✅ pengawatan 3-wire benar, RREF dari multimeter + offset −1 °C ([spesifikasi §8.1](SPESIFIKASI-TEKNIS.md)) |
 | Dasbor PC + kalibrasi multi-titik | ✅ jalan |
 | Matematika siklus + nilai per menit di firmware (`lib/HeatboxCycle`) | ✅ teruji, cocok dengan versi Python |
 | Siklus di firmware, pemanas, log flash, LCD | ⏳ belum dibuat |

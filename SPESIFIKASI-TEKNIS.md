@@ -14,7 +14,7 @@ pengaturan, dan tampilan ada di [RANCANGAN-SIKLUS-PENGERINGAN.md](RANCANGAN-SIKL
 | Pemroses | ESP32-WROOM-32 (DevKit V1, 30 pin), 240 MHz, 320 KB RAM, 4 MB flash; USB CH340, UART0 115200 baud. Cadangan: ESP32-S3 (tanpa DAC, jadi composite video tidak bisa) |
 | Load cell | 300 g, jembatan penuh, sensitivitas **terukur 0,7682 mV/V** (§5.2) |
 | ADC berat | TI ADS1232 24 bit ΔΣ, gain 128, 10 SPS, kanal AIN1, referensi rasiometrik (semua lewat jumper) |
-| Sensor suhu | PT100 3 kawat + MAX31865 (VSPI), filter 50 Hz, mode kontinu. Resistor referensi di board berkode 431 (430 Ω); multimeter membaca 423,12 Ω (nilai sebenarnya dipastikan lewat titik es, §8.1) |
+| Sensor suhu | PT100 3 kawat + MAX31865 (VSPI), filter 50 Hz, mode kontinu. Resistor referensi di board berkode 431 (430 Ω); multimeter membaca 423,12 Ω, ditambah offset −1 °C ke sensor pembanding ruang (nilai sebenarnya dipastikan lewat titik es, §8.1) |
 | Input | Rotary encoder EC11 + tombol (polling) |
 | Rencana | Lampu halogen + SSR, limit switch tutup, tombol Start industri 22 mm, LCD composite |
 
@@ -245,14 +245,20 @@ Ketidakpastian satu titik ±0,475 mg; beban minimum untuk S/N 10 adalah 4,75 mg.
   - firmware tetap 3-wire.
 - **Hasil:** rasio 0,2595; siklus fault bersih.
 - **Tuning RREF (12 Okt 2026), multimeter sebagai acuan utama:**
-  - probe merah–biru 110,8 Ω − pasangan merah 0,9 Ω = 109,9 Ω (3-wire membuang hambatan
-    kabel, jadi angka yang sebanding dengan cip adalah tanpa kabel);
-  - 109,9 / 0,2595 → **`RTD_RREF = 423.5f`**, cocok dengan resistor referensi terukur
-    langsung 423,12 Ω;
+  - resistor referensi terukur langsung 423,12 Ω → **`RTD_RREF = 423.12f`**;
+  - cek silang: probe merah–biru 110,8 Ω − pasangan merah 0,9 Ω = 109,9 Ω (3-wire membuang
+    hambatan kabel), 109,9 / rasio 0,2595 = 423,5 Ω; selisihnya hanya 0,25 °C;
   - bacaan saat tuning: 109,9 Ω = 25,4 °C (dengan 430 terbaca 29,8 °C); batas ukur ±965 °C.
-- **Catatan:** sensor pembanding ruang saat itu menunjukkan 23 °C. Selisih 2,4 °C masih
-  dalam ketidakpastian multimeter genggam (±0,5–1 % ≈ ±1–3 °C). Acuan yang lebih kuat adalah
-  titik es (0 °C = 100,00 Ω).
+- **Offset −1 °C (12 Okt 2026, keputusan pemilik) → `RTD_OFFSET_C = -1.0f`:**
+  - PT100 konsisten lebih tinggi dari sensor pembanding ruang: 25,4 vs 23 °C (+2,4) dan
+    28,6 vs 26 °C (+2,6). Selisih yang tetap berarti kesalahan kalibrasi, bukan noise;
+  - pemanasan probe oleh arus bias sudah disingkirkan: saat bias baru hidup bacaan datar
+    28,62–28,65 °C selama 70 detik;
+  - multimeter genggam (±0,5–1 % ≈ ±1,4–2,9 °C) tidak bisa memutus selisih ini lewat RREF;
+  - dipilih koreksi sebagian −1 °C, sisa selisih ±1,5 °C. Offset ditambahkan ke suhu
+    (`RtdSensor`); resistansi yang dilaporkan tetap nilai terukur;
+  - kalau penyebab aslinya RREF, selisih di 110 °C ±3,2 °C sebelum offset (±2,2 °C sesudah).
+    Acuan yang lebih kuat adalah titik es (0 °C = 100,00 Ω), yang menggantikan offset ini.
 - `fault 0x00` di report **tidak** membuktikan pengawatan benar: bit deteksi kabel putus
   hanya diperbarui oleh fault-detection cycle. Untuk menjalankan siklus baru, pakai `x`.
 
@@ -334,4 +340,4 @@ raw count):
 | Histeresis pada 10 g | 27,9 mg |
 | Ketidakpastian titik kalibrasi | ±0,475 mg |
 | Ambang STABLE | 5 mg dalam 3,2 detik |
-| Batas ukur suhu (RREF 423,5) | ±965 °C (PT100 kelas B sampai 850 °C) |
+| Batas ukur suhu (RREF 423,12) | ±965 °C (PT100 kelas B sampai 850 °C) |

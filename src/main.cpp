@@ -34,7 +34,8 @@ enum class ReportMode : uint8_t { Human, Csv };
 
 constexpr const char* kCsvHeader = "millis,tempC,rtdOhm,rtdFault,rawCounts,grams,stable,encPos";
 
-RtdSensor rtd({PIN_MAX_CS, PIN_MAX_SCK, PIN_MAX_MISO, PIN_MAX_MOSI, RTD_WIRES, RTD_RREF, RTD_RNOMINAL});
+RtdSensor rtd({PIN_MAX_CS, PIN_MAX_SCK, PIN_MAX_MISO, PIN_MAX_MOSI, RTD_WIRES, RTD_RREF, RTD_RNOMINAL,
+               RTD_OFFSET_C});
 Ads1232 loadCell({PIN_ADS_SCLK, PIN_ADS_DOUT, PIN_ADS_PDWN});
 EncoderInput encoder({PIN_ENC_A, PIN_ENC_B, PIN_ENC_SW});
 HardwareSensors sensors(loadCell, rtd);
@@ -103,8 +104,9 @@ void printBanner() {
                   PIN_ADS_SCLK, PIN_ADS_DOUT, PIN_ADS_PDWN);
     Serial.printf("   Encoder EC11    : A=%d B=%d SW=%d\n", PIN_ENC_A, PIN_ENC_B, PIN_ENC_SW);
     Serial.println("   Terlarang       : 0,1,2,3,5,6-11,12,15 | video 25,26 | cadangan 14,21,22,34-39");
-    Serial.printf(" RTD     : PT%.0f %s, RNOMINAL=%.1f ohm, RREF=%.1f ohm, filter 50 Hz, %" PRIu32 " ms/sampel\n",
-                  RTD_RNOMINAL, wireModeText(), RTD_RNOMINAL, RTD_RREF, RtdSensor::kSamplePeriodMs);
+    Serial.printf(" RTD     : PT%.0f %s, RNOMINAL=%.1f ohm, RREF=%.2f ohm, offset %+.2f C, filter 50 Hz, %" PRIu32 " ms/sampel\n",
+                  RTD_RNOMINAL, wireModeText(), RTD_RNOMINAL, RTD_RREF, RTD_OFFSET_C,
+                  RtdSensor::kSamplePeriodMs);
     Serial.println(" ADS1232 : asumsi jumper GAIN=128, SPEED=10 SPS, A0=GND (AIN1)");
     Serial.printf("           gerbang spike %.0f sigma (median-%u) -> rata-rata adaptif s.d. %u sampel\n",
                   Ads1232::kSpikeGateSigma, static_cast<unsigned>(Ads1232::kMedianSize),
@@ -234,7 +236,8 @@ void printRtdPanel() {
     logLine("  rasio terukur       = %.6f   <- besaran yang benar-benar diukur cip", measured);
     logLine("  resistansi          = %.2f ohm   (RREF di pins.h = %.1f)", rtd.rtdResistance(),
             RTD_RREF);
-    logLine("  suhu                = %.2f C", rtd.tempC());
+    logLine("  suhu                = %.2f C   (termasuk offset %+.2f C di pins.h)", rtd.tempC(),
+            RTD_OFFSET_C);
 
     // Rasio tidak bergantung pada RTD_RREF, jadi dari rasio dan resistor
     // referensi FISIK terlihat resistansi probe yang benar-benar dilihat cip.

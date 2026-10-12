@@ -103,7 +103,8 @@ sampai puluhan mg saat jumper disentuh (SPESIFIKASI §8.2). Pedoman untuk bagian
 - **Pre-heat tidak dihitung** dalam batas minimum/maksimum. Batas itu dihitung dari t = 0
   di awal fase HEAT **[KUNCI]**.
 - **Tidak ada kalibrasi offset sensor suhu di dalam siklus [KUNCI].** Sensor suhu di-tuning
-  sekali saat perakitan, lalu dianggap tetap.
+  sekali saat perakitan, lalu dianggap tetap (`RTD_RREF` + `RTD_OFFSET_C` di `pins.h`,
+  SPESIFIKASI §8.1).
 - **Tahap "80 °C selama X menit setelah sampel masuk"** dari rancangan awal **dihapus
   [KUNCI]**. Pre-heat hanya terjadi sebelum sampel masuk (dihitung dari tombol Start).
   Setelah sampel masuk, suhu turun karena tutup baru dibuka. Alat menunggu suhu kembali ke

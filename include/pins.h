@@ -45,16 +45,24 @@
 // ---------------------------------------------------------------------
 //  Konstanta hardware RTD
 //  RTD_RREF = nilai SEBENARNYA resistor referensi di board (nominal 430
-//  ohm, kode 431). Tuning 12 Okt 2026 dengan multimeter sebagai acuan:
-//    probe merah-biru 110,8 ohm - pasangan merah 0,9 ohm = 109,9 ohm
-//    (3-wire membuang hambatan kabel), rasio cip 0,2595 -> 423,5 ohm;
-//    cocok dengan resistor terukur langsung 423,12 ohm.
+//  ohm, kode 431). 12 Okt 2026: dipakai nilai terukur langsung dengan
+//  multimeter, 423,12 ohm (cek silang: probe merah-biru 110,8 ohm -
+//  pasangan merah 0,9 ohm = 109,9 ohm, rasio cip 0,2595 -> 423,5 ohm).
 //  JANGAN diubah untuk menutupi bacaan yang salah: kalau rasio cip tidak
 //  cocok dengan PT100, penyebabnya pengawatan atau jumper 2/3/4-wire
 //  (perintah 'x' menampilkan cek kewajarannya). Ubah hanya dari acuan fisik.
+//
+//  RTD_OFFSET_C = koreksi tetap, sebagian (12 Okt 2026, keputusan pemilik).
+//  PT100 konsisten lebih tinggi 2,4..2,6 C dari sensor pembanding ruang
+//  (25,4 vs 23; 28,6 vs 26); dipilih -1 C, jadi sisa selisih ~+1,5 C.
+//  Multimeter genggam (+-0,5..1 %, setara +-1,4..2,9 C) tidak cukup akurat
+//  untuk memutus selisih ini lewat RREF. Kalau penyebab aslinya RREF,
+//  selisih di 110 C ~+3,2 C sebelum offset (~+2,2 C sesudah).
+//  Ganti dengan RREF dari uji titik es (0 C = 100,00 ohm) bila dilakukan.
 // ---------------------------------------------------------------------
-constexpr float RTD_RREF     = 423.5f;
+constexpr float RTD_RREF     = 423.12f;  // ohm
 constexpr float RTD_RNOMINAL = 100.0f;  // PT100
+constexpr float RTD_OFFSET_C = -1.5f;   // C, ditambahkan ke suhu terhitung
 
 // Mode kabel RTD. Pilihan: MAX31865_2WIRE, MAX31865_3WIRE, MAX31865_4WIRE.
 // Catatan: di library Adafruit, 2WIRE dan 4WIRE bernilai sama (bit 3-wire

@@ -116,7 +116,7 @@ void RtdSensor::readSample() {
     rawCode_ = static_cast<uint16_t>(reg >> 1);  // D0 = flag fault
 
     resistance_ = (static_cast<float>(rawCode_) / kAdcFullScale) * cfg_.rrefOhm;
-    tempC_ = max_.calculateTemperature(rawCode_, cfg_.rnominalOhm, cfg_.rrefOhm);
+    tempC_ = max_.calculateTemperature(rawCode_, cfg_.rnominalOhm, cfg_.rrefOhm) + cfg_.offsetC;
 
     // FAULT_NONE: hanya baca register status, tanpa fault-detection cycle
     fault_ = max_.readFault(MAX31865_FAULT_NONE);
@@ -239,7 +239,7 @@ uint16_t RtdSensor::rawCode() const { return rawCode_; }
 uint16_t RtdSensor::rawRegister() const { return rawRegister_; }
 float RtdSensor::ratio() const { return static_cast<float>(rawCode_) / kAdcFullScale; }
 float RtdSensor::maxMeasurableTempC() {
-    return max_.calculateTemperature(kAdcMaxCode, cfg_.rnominalOhm, cfg_.rrefOhm);
+    return max_.calculateTemperature(kAdcMaxCode, cfg_.rnominalOhm, cfg_.rrefOhm) + cfg_.offsetC;
 }
 float RtdSensor::thresholdLowOhm() const { return kFaultLowRatio * cfg_.rnominalOhm; }
 float RtdSensor::thresholdHighOhm() const { return kFaultHighRatio * cfg_.rnominalOhm; }
