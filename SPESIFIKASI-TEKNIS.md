@@ -341,3 +341,9 @@ raw count):
 | Ketidakpastian titik kalibrasi | ±0,475 mg |
 | Ambang STABLE | 5 mg dalam 3,2 detik |
 | Batas ukur suhu (RREF 423,12) | ±965 °C (PT100 kelas B sampai 850 °C) |
+
+## 11. Ide Tambahan
+- calibration tetep di pakai nanti di user interface dan masuk ke SOP
+- ada lampu indikator 1 lampu warna bisa berubah, terdiri dari preparation alat orange sudah siap jika buru buru, hijau sudah oke banget, siap tare dan calibration setelah itu dengan batu timbangan 10g, lampu untuk proses juga
+- 
+
