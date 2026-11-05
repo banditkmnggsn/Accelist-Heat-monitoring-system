@@ -1,7 +1,7 @@
 #pragma once
 // =====================================================================
 //  golden_cases.h — DIBANGKITKAN OTOMATIS oleh gen_golden.py dari
-//  tuning_web/drying.py. JANGAN diedit manual; jalankan ulang skripnya.
+//  archive/tuning_web/drying.py. JANGAN diedit manual; jalankan ulang skripnya.
 // =====================================================================
 
 #include <cstddef>

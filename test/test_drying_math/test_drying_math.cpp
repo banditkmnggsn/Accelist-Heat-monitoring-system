@@ -1,5 +1,5 @@
 // =====================================================================
-//  test_drying_math — port C++ lib/HeatboxCycle vs tuning_web/drying.py
+//  test_drying_math — port C++ lib/HeatboxCycle vs archive/tuning_web/drying.py
 //
 //  Jawaban di golden_cases.h DIHITUNG oleh drying.py (gen_golden.py),
 //  implementasi yang sudah teruji di siklus PC. Kalau uji ini lolos,

@@ -4,24 +4,24 @@ Web lokal yang membaca report firmware dari ESP32 lewat serial (`115200` baud): 
 perintah perawatan, kalibrasi multi-titik, dan siklus pengeringan **versi PC**. ESP32 tidak
 membutuhkan Wi-Fi.
 
-**Masa transisi:** sesuai [RANCANGAN-SIKLUS-PENGERINGAN.md](../RANCANGAN-SIKLUS-PENGERINGAN.md),
-siklus akan pindah ke firmware dan alat berdiri sendiri dengan LCD. Setelah itu dasbor ini
-dipakai untuk kalibrasi, melihat estimasi waktu stop, dan mengambil log. Panel siklus PC
-dipensiunkan, tetapi `drying.py` dan `cycle.py` tetap disimpan sebagai implementasi acuan
-untuk menguji firmware — **jangan dihapus**.
+> **DIARSIPKAN (5 Nov 2026).** Alat sekarang berdiri sendiri dengan LCD composite + rotary;
+> dasbor ini tidak dipakai lagi. `drying.py` dan `cycle.py` tetap menjadi **implementasi acuan
+> untuk uji port C++** (`test/test_drying_math/gen_golden.py` mengimpor `drying.py` dari folder
+> ini) — **jangan dihapus**. Firmware sekarang tidak lagi mencetak report 500 ms secara bawaan;
+> nyalakan dengan perintah serial `v` kalau dasbor perlu dipakai untuk servis.
 
 ## Menjalankan
 
 ```powershell
 python -m pip install pyserial
-python tuning_web/server.py
+python archive/tuning_web/server.py
 ```
 
 Buka http://127.0.0.1:8080. Tutup dengan `Ctrl+C`. Port default `COM3`; kalau berbeda:
 
 ```powershell
 $env:TUNING_SERIAL_PORT = "COM5"
-python tuning_web/server.py
+python archive/tuning_web/server.py
 ```
 
 Serial Monitor PlatformIO dan proses upload harus ditutup/selesai dulu, karena satu port
@@ -39,7 +39,7 @@ meng-upload firmware.
 | `index.html` | halaman dasbor |
 | `test_cycle.py` | uji otomatis, termasuk siklus penuh dengan data sintetis |
 
-Uji: `cd tuning_web` lalu `python -m unittest test_cycle -v`.
+Uji: `cd archive/tuning_web` lalu `python -m unittest test_cycle -v`.
 
 ## Panel "Siklus sampel" (versi PC, akan dipensiunkan)
 

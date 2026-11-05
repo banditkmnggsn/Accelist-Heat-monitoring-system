@@ -1,4 +1,4 @@
-"""Bangkitkan vektor emas test_drying_math dari tuning_web/drying.py.
+"""Bangkitkan vektor emas test_drying_math dari archive/tuning_web/drying.py.
 
 Port C++ (lib/HeatboxCycle/src/DryingMath.cpp) harus memberi angka yang sama
 dengan implementasi Python yang sudah teruji di siklus PC. Skrip ini
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1] / "tuning_web"))
+sys.path.insert(0, str(HERE.parents[1] / "archive" / "tuning_web"))
 
 import drying  # noqa: E402
 
@@ -143,7 +143,7 @@ def main():
         "#pragma once\n",
         "// =====================================================================\n",
         "//  golden_cases.h — DIBANGKITKAN OTOMATIS oleh gen_golden.py dari\n",
-        "//  tuning_web/drying.py. JANGAN diedit manual; jalankan ulang skripnya.\n",
+        "//  archive/tuning_web/drying.py. JANGAN diedit manual; jalankan ulang skripnya.\n",
         "// =====================================================================\n\n",
         "#include <cstddef>\n\n",
         "namespace golden {\n\n",

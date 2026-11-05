@@ -3,7 +3,7 @@
 // =====================================================================
 //  DryingMath.h — matematika kurva pengeringan untuk siklus di firmware
 //
-//  Port langsung dari tuning_web/drying.py, yang sudah teruji di PC.
+//  Port langsung dari archive/tuning_web/drying.py, yang sudah teruji di PC.
 //  Nama fungsi dan URUTAN OPERASI sengaja sama, supaya hasilnya bisa
 //  dicocokkan angka per angka dengan vektor emas dari Python
 //  (test/test_drying_math). Kalau rumus di sini diubah, ubah juga di
