@@ -103,4 +103,4 @@ Skema lengkap: [KONTROL-ROTARY.md](KONTROL-ROTARY.md). Semua konstanta waktu di
 |---|---|---|
 | 8.1 | OTA | ArduinoOTA dengan password dulu (password di `include/secrets.h` → `OTA_PASS`, tidak di-commit). Nanti diganti lewat aplikasi IoT |
 | 8.2 | Input WiFi | Daftar SSID hasil scan, lalu password diketik **satu karakter per kolom** (bukan papan huruf penuh): karakter aktif berkedip; PUTAR = ganti karakter urut; TEKAN 1× = ganti a-z ↔ A-Z; TEKAN 2× = angka & simbol; TAHAN di karakter = kunci karakter itu, lanjut ke kolom berikutnya. Disimpan di NVS `hbnet` |
-| 8.3 | Servis timbangan | Kalibrasi di layar servis menggantikan dasbor, tetapi **versi minimal dulu**: TARE, KALIBRASI 1 TITIK, dan beberapa yang penting saja. Multi-titik lengkap (03-40.4) belakangan |
+| 8.3 | Servis timbangan | Kalibrasi di layar servis menggantikan dasbor, **versi minimal dulu** (disetujui): STATUS SENSOR (berat, suhu, STABLE/MOVING live), TARE, KALIBRASI 1 TITIK (acuan 1–100 g, tunggu STABLE, simpan ke NVS `heatbox`), SELF-CAL ADS1232, RESET ADS1232. Multi-titik lengkap (03-40.4) belakangan |
