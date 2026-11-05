@@ -94,6 +94,7 @@ archive/            semua yang tidak dipakai lagi (lihat archive/README.md)
 
 | Dokumen | Isi |
 |---|---|
+| [docs/KONTEKS-SINKRON.md](docs/KONTEKS-SINKRON.md) | Konteks lengkap sesi pengembangan (status, aturan, keputusan, lingkup Prompt 2) — dibaca dulu oleh sesi Claude baru |
 | [RANCANGAN-SIKLUS-PENGERINGAN.md](RANCANGAN-SIKLUS-PENGERINGAN.md) | Rancangan lengkap: alur, pengaturan bawaan, pengolahan data, status, log, LCD, rencana uji, pertanyaan terbuka |
 | [SPESIFIKASI-TEKNIS.md](SPESIFIKASI-TEKNIS.md) | Angka terukur, pin, protokol, kalibrasi, perintah serial, masalah terbuka |
 | [docs/ui/KEPUTUSAN-UI.md](docs/ui/KEPUTUSAN-UI.md) | Keputusan tampilan, terutama yang menyimpang dari desain |
