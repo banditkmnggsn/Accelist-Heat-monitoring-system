@@ -96,3 +96,11 @@ Skema lengkap: [KONTROL-ROTARY.md](KONTROL-ROTARY.md). Semua konstanta waktu di
 | 7.3 | FASE 2 dan 3 di-commit bersama | Kerangka layar (`Ui`, `Screen`) dan layar-layarnya saling bergantung; commit terpisah tidak bisa di-build |
 | 7.4 | Versi library dikunci ke versi yang terbit sebelum tes LCD 28 Okt 2026: ESP_8_BIT 1.3.2, Adafruit GFX 1.13.0, BusIO 1.17.4 | `pio pkg list` tidak bisa dijalankan di sesi cloud; **cek sekali saat build pertama di PC** |
 | 7.5 | Native unit test tanpa `USE_CURVE_FIT` / `test/support` (milik suite lama yang diarsipkan) | — |
+
+## 8. Disepakati untuk Prompt 2 (belum dikerjakan)
+
+| # | Topik | Keputusan pemilik (5 Nov 2026) |
+|---|---|---|
+| 8.1 | OTA | ArduinoOTA dengan password dulu (password di `include/secrets.h` → `OTA_PASS`, tidak di-commit). Nanti diganti lewat aplikasi IoT |
+| 8.2 | Input WiFi | Daftar SSID hasil scan, lalu password diketik **satu karakter per kolom** (bukan papan huruf penuh): karakter aktif berkedip; PUTAR = ganti karakter urut; TEKAN 1× = ganti a-z ↔ A-Z; TEKAN 2× = angka & simbol; TAHAN di karakter = kunci karakter itu, lanjut ke kolom berikutnya. Disimpan di NVS `hbnet` |
+| 8.3 | Servis timbangan | Kalibrasi di layar servis menggantikan dasbor, tetapi **versi minimal dulu**: TARE, KALIBRASI 1 TITIK, dan beberapa yang penting saja. Multi-titik lengkap (03-40.4) belakangan |
