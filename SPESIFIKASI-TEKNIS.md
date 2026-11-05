@@ -1,6 +1,6 @@
 # Spesifikasi Teknis — Heat Box
 
-**Tahap:** breadboard · **Pengukuran:** 23 September 2026 · **Diperbarui:** 5 Oktober 2026
+**Tahap:** breadboard (dirangkai sama persis dengan skematik) · **Pengukuran:** 23 September 2026 · **Diperbarui:** 5 November 2026
 
 Angka di dokumen ini hasil pengukuran, kecuali diberi rujukan datasheet. Rancangan siklus,
 pengaturan, dan tampilan ada di [RANCANGAN-SIKLUS-PENGERINGAN.md](RANCANGAN-SIKLUS-PENGERINGAN.md).
@@ -15,47 +15,65 @@ pengaturan, dan tampilan ada di [RANCANGAN-SIKLUS-PENGERINGAN.md](RANCANGAN-SIKL
 | Load cell | 300 g, jembatan penuh, sensitivitas **terukur 0,7682 mV/V** (§5.2) |
 | ADC berat | TI ADS1232 24 bit ΔΣ, gain 128, 10 SPS, kanal AIN1, referensi rasiometrik (semua lewat jumper) |
 | Sensor suhu | PT100 3 kawat + MAX31865 (VSPI), filter 50 Hz, mode kontinu. Resistor referensi di board berkode 431 (430 Ω); multimeter membaca 423,12 Ω, ditambah offset −1,5 °C ke sensor pembanding ruang (nilai sebenarnya dipastikan lewat titik es, §8.1) |
-| Input | Rotary encoder EC11 + tombol (polling) |
-| Rencana | Lampu halogen + SSR, limit switch tutup, tombol Start industri 22 mm, LCD composite |
+| Input | Rotary encoder EC11 + tombol (polling 1 kHz), limit switch pintu |
+| Tampilan | LCD composite 256×240 lewat DAC1 (GPIO25), `ESP_8_BIT_GFX`, RGB332, double buffer |
+| Suara | Buzzer pasif 5 V lewat BC337 (GPIO12), nada PWM LEDC |
+| Jaringan | WiFi STA + NTP (WIB); bisa dimatikan lewat build flag `ENABLE_WIFI=0` |
+| Rencana | Lampu halogen + SSR + relay pengaman K1 (pin sudah ada, firmware belum menyalakan), tombol Start industri 22 mm (pin sudah ada, belum dipakai) |
 
 ---
 
 ## 2. Pin
 
-| Fungsi | GPIO |
-|---|---|
-| MAX31865 SCK / MISO / MOSI / CS | 18 / 19 / 23 / 17 |
-| ADS1232 SCLK / DOUT-DRDY / PDWN | 4 / 16 / 13 |
-| Encoder A / B / SW | 32 / 33 / 27 |
-| *Rencana:* composite video / SSR / saklar tutup / tombol Start | 25 / 22 / 34 / 35 |
+Acuan: skematik `docs/hardware/Schematic_HMA-CONTROL_2026-11-05.pdf` dan
+`Schematic_HMA-POWER_2026-11-05.pdf`. Satu-satunya tempat alokasi pin di firmware:
+`include/pins.h`.
 
-- **Dilarang:** strapping (0, 2, 5, 12, 15), UART0 (1, 3), flash (6–11). Larangan ini
-  ditegakkan `static_assert` di `include/pins.h`.
-- **Cadangan:** 14, 21, 22, 25, 26, 34–39.
-- CS MAX31865 sengaja bukan GPIO5 (strapping).
+| Fungsi | GPIO | Rangkaian |
+|---|---|---|
+| MAX31865 SCK / MISO / MOSI / CS | 18 / 19 / 23 / 17 | VSPI; CS sengaja bukan GPIO5 |
+| ADS1232 SCLK / DOUT-DRDY / PDWN | 4 / 16 / 13 | R seri 47 Ω; R19/R22 100k menahan SCLK/PDWN LOW saat boot |
+| Rotary A (CLK) / B (DT) / SW | 32 / 33 / 27 | tiap jalur R seri 1k + pull-up 10k + 100 nF (~1 ms) |
+| Composite video | 25 | DAC1 langsung ke RCA (J9), tanpa R seri |
+| Limit switch pintu | 34 | input saja; pull-up R8 10k eksternal, R10 1k, C17; **LOW = tertutup** (`PIN_DOOR_ACTIVE_LEVEL`) |
+| Tombol START | 35 | input saja; pull-up R4 10k + RC; belum dipakai |
+| Buzzer BZ1 (pasif, 5 V) | 12 | BC337 low-side, R26 1k basis, **R27 10k pull-down** (strapping MTDI wajib LOW), D3 1N4002 flyback, C30 100 nF |
+| SSR lampu (HLController) | 22 | BC337 low-side di board Power, pull-down R16; **selalu LOW di firmware sekarang** |
+| Relay pengaman K1 (HLSafety) | 21 | BC337 low-side, pull-down R17; **selalu LOW di firmware sekarang** |
+| DS18B20 | 5 | pull-up R12 4k7 (= level boot benar); belum dipakai |
+| Ekstensi J12 | 2, 14, 15, 26, 36, 39 | tidak dipakai firmware |
 
----
+- **Dilarang** (ditegakkan `static_assert` di `pins.h`): UART0 (1, 3), flash (6–11), strapping
+  0, 2, 15. Strapping 5 dan 12 hanya untuk DS18B20 dan buzzer, karena rangkaiannya menjamin
+  level boot. Pin output tidak boleh di GPIO34–39. Semua pin harus unik.
+- **Pin I2C bawaan Arduino ESP32 = SDA 21 / SCL 22 = relay K1 dan SSR.** `Wire.begin()` tidak
+  boleh dipanggil di mana pun.
+- Library video hanya memakai DAC1 (GPIO25); GPIO26 (DAC2) bebas.
 
 ## 3. Perangkat lunak
 
 | | |
 |---|---|
-| Kerangka | PlatformIO `espressif32@6.5.0`, Arduino core 2.0.14. **Dikunci**: library composite video tidak kompatibel dengan core 3.x |
-| Pemakaian (5 Okt 2026) | RAM 23 996 B (7,3 %), Flash 313 185 B (23,9 %) |
+| Kerangka | PlatformIO `espressif32@6.5.0`, Arduino core 2.0.14 (C++11). **Dikunci**: library composite video tidak kompatibel dengan core 3.x |
+| Library | Adafruit MAX31865 ^1.6.0, ESP_8_BIT Color Composite Video 1.3.2, Adafruit GFX 1.13.0, Adafruit BusIO 1.17.4 (dikunci) |
+| Pemakaian (5 Nov 2026) | RAM statis 50 956 B (15,6 %), flash 841 513 B (64,2 %) dengan WiFi; tanpa WiFi 28 512 B / 395 217 B. Ditambah framebuffer video 2 × 61 440 B dari heap saat jalan |
+| Task | core 1: ISR video, task input 1 kHz (prioritas 3), `loop()` UI; core 0: WiFi, task sensor (prioritas 4) |
 
 ```
-include/pins.h, app_config.h   pin, konstanta hardware dan aplikasi
+include/pins.h, app_config.h   pin, konstanta hardware dan aplikasi (termasuk semua waktu input)
 lib/Ads1232/                   driver bit-bang ADS1232
 lib/RtdSensor/                 pembungkus MAX31865 non-blocking
-lib/EncoderInput/              encoder EC11
-lib/HeatboxCycle/              siklus di firmware: matematika, nilai per detik/per menit
-lib/Heatbox/                   versi lama, tidak dipakai, akan diganti HeatboxCycle
-src/main.cpp                   loop, report serial, perintah serial
+lib/HeatboxCycle/              siklus di firmware: matematika, per detik/menit, pengaturan
+lib/HeatboxInput/              decoder rotary + gesture TEKAN/TAHAN
+lib/HeatboxUi/                 tampilan LCD (tema, ikon, widget, layar)
+src/main.cpp                   video + UI loop
+src/SensorService.*            task sensor, perintah serial, ringkasan 10 dtk
+src/InputTask.*, Buzzer.*      polling input 1 kHz, buzzer LEDC (tabel suara: sounds.h)
+src/NetClock.*                 WiFi STA + NTP
+src/SettingsStore.*            pengaturan NVS "hbcfg"
 src/HardwareSensors.*          sumber data sensor hardware untuk siklus
-tuning_web/                    dasbor PC (Python stdlib + pyserial)
+archive/                       kode lama yang tidak dipakai (dasbor PC, lib/Heatbox, tes hardware)
 ```
-
----
 
 ## 4. Firmware sekarang
 
@@ -96,7 +114,8 @@ raw 24 bit → gerbang spike 6σ (pengganti: median-of-5) → rata-rata adaptif 
 - **Tare otomatis saat nyala:** hanya kalau beda dari offset tersimpan < 30 g. Pesan
   "SUDAH SETIMBANG" muncul sekali saat drift < 3 mg/menit.
 - **NVS** (`Preferences`, namespace `heatbox`): `ads_offset_d` (double, count) dan `ads_cpg`
-  (float, count/gram).
+  (float, count/gram). Pengaturan operator ada di namespace terpisah `hbcfg` (kunci `cfg`, blob
+  18 bait ber-CRC32); kredensial WiFi opsional di `hbnet` (`ssid`, `pass`).
 - Siklus baru tidak memakai angka `W` ini; siklus memakai rata-rata per detik dari sampel
   lolos gerbang (rancangan §5).
 
@@ -199,13 +218,23 @@ Ketidakpastian satu titik ±0,475 mg; beban minimum untuk S/N 10 adalah 4,75 mg.
 | `n` / `m <mg> <u\|d>` | Rekam nol / titik kalibrasi → baris `CALZERO` / `CALPT` |
 | `s <cpg>` | Terapkan count/gram hasil fit PC |
 | `z` / `r` | Self-calibration / reset ADS1232 |
-| `v` | Mode report human ↔ CSV |
+| `v` | Report 500 ms: mati → human → CSV → mati (bawaan **mati**) |
 | `e` | Reset posisi encoder |
 | `p` | Kalibrasi tersimpan + diagnostik load cell (drift, noise, window) |
 | `x` | Diagnostik MAX31865 + fault-detection cycle baru |
 | `?` | Bantuan |
 
-**Report tiap 500 ms** (format ini di-parse dasbor; jangan diubah):
+**Ringkasan tiap 10 detik** (selalu jalan), untuk membandingkan noise ADS dengan LCD + WiFi
+aktif terhadap §5.3:
+```
+# RINGKASAN t=120s | berat sd 3.52 mg (19.4 cnt) p-p 18.1 mg spike +0 | suhu 27.41 C | heap 141000 B (min 139000) | render 1.2 fps NTSC | WiFi OK -61 dBm, jam 14:05
+```
+`sd` = SD 64 sampel raw setelah drift linear dibuang (sama dengan perintah `p`); `render` = frame
+UI yang digambar ulang per detik (gambar ulang hanya saat berubah, maks ~10); `*` setelah jam =
+belum sinkron NTP.
+
+**Report tiap 500 ms** (bawaan mati, nyalakan dengan `v`; format ini di-parse dasbor arsip,
+jangan diubah):
 ```
 [ 12.5s] RTD 27.41 C (R=110.62, fault 0x00) | W 14.2381 g STABLE (raw 452331) | ENC 0 btn:-
 ```
@@ -294,9 +323,10 @@ raw count):
 
 ### 8.4 Uji unit
 - **Tidak ada gcc** di mesin pengembangan, jadi `pio test -e native` belum bisa dipakai.
-- **Suite siklus firmware** (`test_drying_math`, `test_cycle_aggregation`) jalan lewat
-  MSVC 2019: `test\run_msvc.bat`.
-- **Tujuh suite lama untuk `lib/Heatbox`** belum bisa jalan.
+- **Empat suite** (`test_drying_math`, `test_cycle_aggregation`, `test_settings`,
+  `test_input`) jalan lewat MSVC 2019 (`test\run_msvc.bat`) atau g++ (`test/run_gcc.sh`).
+  5 Nov 2026: 49 uji lolos dengan g++ `-Wall -Wextra -Werror`.
+- Tujuh suite lama untuk `lib/Heatbox` diarsipkan (`archive/test_heatbox_lama/`).
 - **Uji di board** (`pio test -e esp32doit-devkit-v1`) saat ini gagal karena Adafruit BusIO
   dari `lib_deps` tidak menemukan `Wire.h`.
 
@@ -313,21 +343,11 @@ raw count):
 
 ---
 
-## 9. Dasbor PC (`tuning_web/`)
+## 9. Dasbor PC — diarsipkan
 
-| Berkas | Fungsi |
-|---|---|
-| `server.py` | HTTP 127.0.0.1:8080, pembaca serial, API |
-| `analysis.py` | regresi dan metrik kalibrasi (stdlib saja) |
-| `drying.py`, `cycle.py` | siklus versi PC; acuan uji untuk port firmware |
-| `index.html` | dasbor |
-
-- Tiap sesi server menulis `data/calibration_<tanggal>_<jam>.csv` (kolom `recorded_at,
-  millis, nominal_mg, direction, raw_mean, raw_sd, samples, rtd_ohm, rtd_temp_c,
-  zero_before, zero_after`).
-- Siklus PC menyimpan data ke `data/cycle_<tanggal>_<jam>/`.
-
----
+Dasbor PC (`archive/tuning_web/`) tidak dipakai lagi sejak alat berdiri sendiri dengan LCD.
+`drying.py` dan `cycle.py` tetap menjadi implementasi acuan uji port C++. Kalau dasbor perlu
+dipakai untuk servis, nyalakan report lama dengan perintah serial `v`.
 
 ## 10. Angka kunci
 

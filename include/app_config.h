@@ -28,7 +28,7 @@ constexpr uint32_t kSummaryPeriodMs = 10000;
 // Buffer command serial: 1 huruf + argumen + '\0'
 constexpr size_t kCommandBufferSize = 32;
 // Buffer satu baris pesan log ("# ...")
-constexpr size_t kLogBufferSize = 192;
+constexpr size_t kLogBufferSize = 256;  // cukup untuk baris RINGKASAN
 
 constexpr float kMsPerSecond = 1000.0f;
 

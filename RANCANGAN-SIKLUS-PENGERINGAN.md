@@ -1,8 +1,9 @@
 # Rancangan Siklus Pengeringan — Heat Box
 
 **Versi:** 5 Oktober 2026
-**Status:** rancangan disetujui. Implementasi baru langkah 1 (matematika kurva di firmware,
-teruji). Siklus di firmware, pemanas, logger, dan LCD belum dibuat (§13).
+**Status:** rancangan disetujui. Selesai: matematika kurva + nilai per menit di firmware
+(teruji), fondasi LCD + rotary + pengaturan (Prompt 1, 5 Nov 2026, menunggu uji LCD fisik).
+Siklus di firmware, pemanas, logger, dan layar tes/hasil belum dibuat (§13).
 
 Ini satu-satunya dokumen panjang di proyek: alur operator, pengaturan dan nilai bawaan,
 pengolahan data, penanganan drift, status hasil, log, tampilan LCD, dan rencana uji.
@@ -132,6 +133,9 @@ sampai puluhan mg saat jumper disentuh (SPESIFIKASI §8.2). Pedoman untuk bagian
 | Waktu minimum heat | **3 menit** | 1 menit **[USUL]** | 25 menit **[USUL]** |
 | Waktu maksimum heat (timeout) | **25 menit** | 5 menit **[USUL]** | 60 menit **[USUL]** |
 
+- **Implementasi (Nov 2026, desain LCD):** suhu pre-heat dan heat disimpan per **profil**
+  (PROFIL 1–3, operator memilih profil aktif); lama pre-heat dan waktu min/maks berlaku umum.
+  Bawaan semua profil 80/110 °C. Ditambah setelan **suara nyala/mati**.
 - "EEPROM" di ESP32 adalah **NVS** (`Preferences`). Pengaturan disimpan di namespace sendiri
   (`hbcfg`), terpisah dari kalibrasi load cell (`heatbox`) **[USUL]**.
 - Menu **"Reset Default"** mengembalikan kelima nilai di atas setelah konfirmasi. Menu ini
@@ -446,21 +450,39 @@ SensorInput (antarmuka)              HeaterOutput (antarmuka)
   sekarang mengembalikan nilai sebelum gerbang.
 - **`lib/Heatbox` lama diganti** oleh `lib/HeatboxCycle`, bukan diperbaiki.
 
+**Implementasi tampilan & input (Prompt 1, 5 Nov 2026):**
+
+| Core | Isi |
+|---|---|
+| 1 | ISR video composite (`ESP_8_BIT_GFX`, `begin()` dari `setup()`), task input 1 kHz (rotary, pintu, buzzer; `src/InputTask`), `loop()` = UI (`lib/HeatboxUi`) |
+| 0 | WiFi (bawaan ESP-IDF) + task sensor (`src/SensorService`: ADS1232, MAX31865, serial, ringkasan 10 dtk, WiFi/NTP) |
+
+- Alasan: bacaan ADS1232 memakai *critical section* ±150 µs yang mematikan interupsi di core
+  pemanggilnya, sedangkan ISR video hanya punya 2 buffer baris (63,5 µs/baris NTSC). Di core
+  yang berbeda keduanya tidak saling ganggu.
+- `HeatBoxDataSource` untuk tahap ini = `hbui::UiSnapshot` (baca-saja, disusun tiap 50 ms) dan
+  perintah UI lewat `hbui::UiCommands`. Logika tidak tahu tampilan.
+- `lib/HeatboxInput` (C++ murni): decoder rotary, debounce, gesture TEKAN/TAHAN.
+- Pengaturan operator: `hbcycle::Settings` (3 profil suhu + waktu umum + suara), NVS `hbcfg`.
+- Keputusan tampilan: `docs/ui/KEPUTUSAN-UI.md`; kontrol: `docs/ui/KONTROL-ROTARY.md`.
+
 **Board [KUNCI]:** ESP32 DevKit V1. Kalau pin, flash, atau batas lain tidak cukup, pindah
 ke **ESP32-S3** sebagai cadangan. Catatan: ESP32-S3 **tidak punya DAC**, sedangkan
 composite video (`ESP_8_BIT_GFX`) memakai DAC di GPIO25. Pindah ke S3 berarti tampilan juga
 diganti, mis. LCD RGB 480×272 seperti di proyek uji `LCD_testing`. Karena logika dipisah
 dari tampilan, yang diganti hanya `LcdView`.
 
-**Pin tambahan [USUL]** (sekarang masuk daftar "cadangan" di `include/pins.h`):
+**Pin tambahan [KUNCI, skematik 5 Nov 2026]** (lengkap di SPESIFIKASI §2 dan `include/pins.h`):
 
 | Fungsi | GPIO | Catatan |
 |---|---|---|
-| SSR lampu | 22 (atau 21) | pull-down eksternal |
-| Saklar tutup | 34 | input-only, pull-up eksternal |
-| Tombol Start 22 mm | 35 | input-only; pull-up eksternal 10 kΩ + RC debounce karena kabelnya ke panel |
+| SSR lampu (HLController) | 22 | BC337 low-side, pull-down R16 di board Power |
+| Relay pengaman K1 (HLSafety) | 21 | BC337 low-side, pull-down R17 |
+| Saklar pintu | 34 | input-only, pull-up R8 10k eksternal, LOW = tertutup |
+| Tombol Start 22 mm | 35 | input-only; pull-up R4 10k + RC; belum dipakai |
 | Composite video | 25 | DAC1 |
-| Sensor suhu load cell (opsional) | 21 | 1-Wire |
+| Buzzer pasif | 12 | BC337 low-side, R27 pull-down (strapping wajib LOW) |
+| DS18B20 suhu load cell (opsional) | 5 | 1-Wire, pull-up R12 4k7 |
 | **Hindari** | 14 | mengeluarkan PWM saat boot → lampu berkedip |
 
 **Serial dan dashboard [USUL]:**
@@ -468,9 +490,10 @@ dari tampilan, yang diganti hanya `LcdView`.
   bergantung padanya.
 - Baris baru `CYC,...` (tanpa `# `) membawa fase dan **estimasi waktu stop**. Setelah LCD
   ada, dasbor cukup menampilkan estimasi waktu stop dan mengambil log **[KUNCI]**.
-- **Sebelum LCD ada, dasbor menjadi panel operator sementara**: tombol Start / Tare / Batal,
-  fase, status, dan estimasi stop. Siklus penuh diuji dari dasbor dulu; rotary, LCD, dan
-  tombol Start dikerjakan bersamaan belakangan **[KUNCI]**.
+- ~~Sebelum LCD ada, dasbor menjadi panel operator sementara~~ — **diganti (Nov 2026):** alat
+  berdiri sendiri dengan LCD + rotary; dasbor PC diarsipkan (`archive/tuning_web`).
+- Report 500 ms sekarang **mati bawaan** (perintah `v`), diganti ringkasan `# RINGKASAN` tiap
+  10 detik. Format report lama tidak diubah kalau dinyalakan.
 - Perintah baru memakai huruf yang belum dipakai: `l` daftar log, `d <id>` ambil log,
   `y ...` kontrol siklus.
 - Panel siklus PC (`tuning_web/cycle.py`) dipensiunkan dari UI karena tombolnya bentrok
@@ -526,9 +549,16 @@ perlu ganti ESP32.
 **Layar:** composite video 256×240 lewat `ESP_8_BIT_GFX` (sudah dicoba di proyek "Heatbox
 LCD"). Jenis LCD belum final.
 
-**Navigasi [KUNCI]:** siklus dimulai dengan tombol Start terpisah. Putar rotary untuk pindah
-screen; screen utama tampil pertama. **[USUL]:** tekan rotary singkat untuk kembali ke screen
-utama, tekan lama untuk membuka menu.
+**Navigasi [KUNCI, Nov 2026]:** hanya rotary (tombol Start belum dipakai). PUTAR = pilih /
+halaman / ubah nilai, TEKAN = OK / simpan, TAHAN 2 dtk = kembali (di Pilih Profil = mulai tes),
+TAHAN 5 dtk di Beranda = servis, batal tes berjalan = TAHAN 3 dtk. Lengkap:
+`docs/ui/KONTROL-ROTARY.md`.
+
+**Desain [KUNCI]:** `docs/ui/LCD_UI_Design.html` + `.pdf` (layar 256×240, palet RGB332, font
+5×7 T1–T4, zona PARKING x 156–255 y 0–42 selalu putih). Penyimpangan dicatat di
+`docs/ui/KEPUTUSAN-UI.md`. Status Prompt 1: boot, beranda, riwayat (kosong), pilih profil,
+pengaturan, error SENSOR, servis (UJI TAMPILAN/INPUT/SUARA) sudah dibuat; layar tes dan hasil
+di bawah ini = Prompt 2.
 
 **Screen hasil:**
 
@@ -566,8 +596,9 @@ stabil + tombol TARE.
   angka di screen utama. ≤ 25–30 titik di area ~220 px masih terbaca.
 - **Batasan composite:** garis minimal 2 px dengan warna kontras tinggi; angka penting minimal
   teks ukuran 2 (12×16 px). Teks ukuran 1 kemungkinan kabur dan perlu diuji di monitornya.
-- **NTSC vs PAL** ditentukan dari parameter konstruktor library (Indonesia umumnya PAL).
-- **RAM:** framebuffer composite ±120 KB (perlu diverifikasi); firmware sekarang memakai 23 KB.
+- **NTSC vs PAL** lewat build flag `VIDEO_PAL` (bawaan NTSC, yang sudah terbukti tampil).
+- **RAM:** framebuffer composite 2 × 61 440 B (double buffer, dari source library); RAM statis
+  firmware 51 KB dengan WiFi (28,5 KB tanpa WiFi), flash 64 %.
 
 ---
 
@@ -610,11 +641,13 @@ Mode report biasa sudah cukup: kolom `raw` adalah sampel mentah tiap 0,5 detik.
 | 5 | Logger LittleFS + ambil log | belum |
 | 6 | Pemanas: SSR, kontrol PI, interlock, saklar tutup | belum |
 | 7 | Blank run + koreksi drift | belum |
-| 8 | LCD: screen live, screen hasil, menu pengaturan | belum |
+| 8a | LCD fondasi (Prompt 1): video + rotary + buzzer + WiFi/NTP, boot, beranda, pilih profil, menu pengaturan, servis uji | **selesai, menunggu uji LCD fisik** — ter-build untuk ESP32 tanpa warning (recipe Arduino-ESP32 2.0.14; `pio run` pertama di PC), 49 uji PC lolos, pratinjau `docs/ui/pratinjau/` |
+| 8b | LCD: screen live tes, screen hasil, riwayat, servis lengkap, OTA (Prompt 2) | belum |
 | 9 | Uji hardware U2–U9, tuning, pembaruan dokumen | belum |
 
-Setelah langkah 4, siklus penuh dijalankan beberapa kali dari dasbor. Rotary, LCD, dan tombol
-Start (langkah 8) baru dikerjakan setelah siklusnya terasa benar **[KUNCI]**.
+~~Setelah langkah 4, siklus penuh dijalankan beberapa kali dari dasbor~~ — diganti (Nov 2026):
+LCD + rotary (8a) dikerjakan lebih dulu; siklus (langkah 3–6) dibuat di Prompt 2 langsung
+dengan operator di LCD.
 
 ---
 
