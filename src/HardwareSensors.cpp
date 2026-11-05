@@ -1,7 +1,7 @@
 #include "HardwareSensors.h"
 
-HardwareSensors::HardwareSensors(Ads1232& loadCell, RtdSensor& rtd)
-    : loadCell_(loadCell), rtd_(rtd) {}
+HardwareSensors::HardwareSensors(Ads1232& loadCell, RtdSensor& rtd, DoorClosedFn doorClosed)
+    : loadCell_(loadCell), rtd_(rtd), doorClosed_(doorClosed) {}
 
 uint32_t HardwareSensors::nowMs() { return millis(); }
 
@@ -19,6 +19,6 @@ hbcycle::ChamberReading HardwareSensors::chamber() {
     hbcycle::ChamberReading reading;
     reading.tempOk = rtd_.valid();
     reading.tempC = reading.tempOk ? rtd_.tempC() : NAN;
-    reading.lidClosed = true;
+    reading.lidClosed = doorClosed_();
     return reading;
 }

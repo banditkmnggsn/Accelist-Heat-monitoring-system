@@ -1,0 +1,10 @@
+{
+  "name": "HeatboxUi",
+  "version": "0.1.0",
+  "description": "Tampilan Heat Box untuk LCD composite 256x240 (Adafruit GFX, RGB332): tema, ikon pixel, widget, layar, dan manajer layar. Logika siklus tidak dikenal di sini; layar hanya membaca UiSnapshot dan mengirim perintah lewat UiCommands",
+  "keywords": ["ui", "composite", "gfx", "heatbox"],
+  "license": "MIT",
+  "authors": [{ "name": "Heatbox Project" }],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}

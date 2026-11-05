@@ -1,6 +1,6 @@
 @echo off
 rem =====================================================================
-rem  Jalankan suite uji lib/HeatboxCycle di PC memakai MSVC (tanpa gcc).
+rem  Jalankan suite uji lib/HeatboxCycle + lib/HeatboxInput di PC memakai MSVC.
 rem  Dari root proyek:   test\run_msvc.bat
 rem  Hasil build di .pio\msvc (sudah di-gitignore). Exit code 1 kalau ada
 rem  yang gagal.
@@ -29,11 +29,11 @@ set "OUT=.pio\msvc"
 if not exist "%OUT%" mkdir "%OUT%"
 set FAILED=0
 
-for %%S in (test_drying_math test_cycle_aggregation) do (
+for %%S in (test_drying_math test_cycle_aggregation test_settings test_input) do (
     echo === %%S
     cl /nologo /std:c++14 /W4 /WX /EHsc /D_CRT_SECURE_NO_WARNINGS ^
-       /I lib\HeatboxCycle\src /I "%UNITY%" ^
-       test\%%S\%%S.cpp lib\HeatboxCycle\src\*.cpp "%UNITY%\unity.c" ^
+       /I lib\HeatboxCycle\src /I lib\HeatboxInput\src /I "%UNITY%" ^
+       test\%%S\%%S.cpp lib\HeatboxCycle\src\*.cpp lib\HeatboxInput\src\*.cpp "%UNITY%\unity.c" ^
        /Fo"%OUT%\\" /Fe"%OUT%\%%S.exe" > "%OUT%\%%S.build.log"
     if errorlevel 1 (
         type "%OUT%\%%S.build.log"

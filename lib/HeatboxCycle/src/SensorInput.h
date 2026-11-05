@@ -24,7 +24,7 @@ struct MassSample {
 struct ChamberReading {
     float tempC;     // NAN kalau tidak sah
     bool tempOk;     // sensor sehat dan bacaan wajar
-    bool lidClosed;  // true kalau saklar tutup belum terpasang
+    bool lidClosed;  // true = pintu tertutup (limit switch)
 };
 
 class SensorInput {

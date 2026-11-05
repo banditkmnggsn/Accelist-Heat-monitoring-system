@@ -1,0 +1,10 @@
+{
+  "name": "HeatboxInput",
+  "version": "0.1.0",
+  "description": "Input rotary Heat Box: decoder quadrature tanpa false trigger, debounce, gesture TEKAN/TAHAN. C++ murni tanpa Arduino.h supaya bisa diuji di PC",
+  "keywords": ["encoder", "ec11", "rotary", "debounce", "heatbox"],
+  "license": "MIT",
+  "authors": [{ "name": "Heatbox Project" }],
+  "frameworks": "*",
+  "platforms": "*"
+}
