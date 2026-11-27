@@ -31,7 +31,6 @@ public:
     bool nextEvent(hbinput::InputEvent& out);
     void setHoldTarget(uint32_t ms) { holdTarget_.store(ms); }
     uint32_t holdProgressMs() const { return holdProgress_.load(); }
-    hbui::InputDiag diag();
     bool doorClosed() const { return doorClosed_.load(); }
     Buzzer& buzzer() { return buzzer_; }
 
@@ -60,11 +59,4 @@ private:
     std::atomic<int32_t> detents_{0};
     std::atomic<char> buttonLatch_{'-'};
     std::atomic<bool> buttonDown_{false};
-
-    // Diagnostik UJI INPUT (dibaca UI di core yang sama, dikunci singkat)
-    portMUX_TYPE diagLock_ = portMUX_INITIALIZER_UNLOCKED;
-    hbui::InputDiag diag_{};
-    int32_t rawAtLastClick_ = 0;
-    uint32_t lastClickMs_ = 0;
-    uint32_t pressStartMs_ = 0;
 };

@@ -3,6 +3,7 @@
 #include <app_config.h>
 
 #include <cmath>
+#include <cstdio>
 
 #include "Widgets.h"
 
@@ -25,8 +26,9 @@ struct KeyHash {
 
 Ui::Ui(UiCommands& commands) : cmd_(commands) {}
 
-void Ui::begin(const hbcycle::Settings& settings, const UiSnapshot& snap) {
+void Ui::begin(const hbcycle::Settings& settings, const hbcycle::AdvancedSettings& advanced, const UiSnapshot& snap) {
     settings_ = settings;
+    advanced_ = advanced;
     depth_ = 1;
     stack_[0] = ScreenId::Boot;
     enterPending_ = true;
@@ -42,19 +44,34 @@ Screen& Ui::screen(ScreenId id) {
         case ScreenId::History: return history_;
         case ScreenId::ProfileSelect: return profileSelect_;
         case ScreenId::SettingsMenu: return settingsMenu_;
+        case ScreenId::ProfileList: return profileList_;
         case ScreenId::EditProfile: return editProfileScreen_;
         case ScreenId::EditGeneral: return editGeneral_;
-        case ScreenId::ServiceMenu: return serviceMenu_;
-        case ScreenId::DisplayTest: return displayTest_;
-        case ScreenId::InputTest: return inputTest_;
-        case ScreenId::SoundTest: return soundTest_;
+        case ScreenId::Wifi: return wifi_;
+        case ScreenId::WifiScan: return wifiScan_;
+        case ScreenId::TextEntry: return textEntry_;
+        case ScreenId::DeviceInfo: return deviceInfo_;
+        case ScreenId::DevGate: return devGate_;
+        case ScreenId::DevMenu: return devMenu_;
+        case ScreenId::SensorStatus: return sensorStatus_;
+        case ScreenId::ScaleActions: return scaleActions_;
+        case ScreenId::Calibration: return calibration_;
+        case ScreenId::ScaleCheck: return scaleCheck_;
+        case ScreenId::EditMethod: return editMethod_;
+        case ScreenId::EditHeater: return editHeater_;
+        case ScreenId::EditDisplay: return editDisplay_;
+        case ScreenId::LogMemory: return logMemory_;
+        case ScreenId::TestRun: return testRun_;
+        case ScreenId::Result: return result_;
+        case ScreenId::TestError: return testError_;
+        case ScreenId::HistoryDetail: return historyDetail_;
         case ScreenId::Count: break;
     }
     return home_;
 }
 
 UiContext Ui::context(const UiSnapshot& snap) {
-    return UiContext{snap, settings_, cmd_, *this, style_, hot_};
+    return UiContext{snap, settings_, advanced_, cmd_, *this, hot_};
 }
 
 void Ui::settle(const UiSnapshot& snap) {
@@ -79,6 +96,18 @@ void Ui::pop() {
     if (depth_ > 1) {
         --depth_;
         enterPending_ = true;
+    }
+}
+
+void Ui::popTo(ScreenId id) {
+    for (uint8_t d = depth_; d > 0; --d) {
+        if (stack_[d - 1] == id) {
+            if (d != depth_) {
+                depth_ = d;
+                enterPending_ = true;
+            }
+            return;
+        }
     }
 }
 
@@ -129,6 +158,9 @@ void Ui::handleDialog(const hbinput::InputEvent& event, const UiSnapshot& snap) 
 
 void Ui::handle(const hbinput::InputEvent& event, const UiSnapshot& snap) {
     dirty_ = true;
+    if (snap.net.ota == OtaState::Updating) {
+        return;  // update firmware: semua input diabaikan
+    }
     if (dialogOpen_) {
         handleDialog(event, snap);
         return;
@@ -156,6 +188,9 @@ void Ui::handle(const hbinput::InputEvent& event, const UiSnapshot& snap) {
 }
 
 HoldSpec Ui::holdSpec(const UiSnapshot& snap) {
+    if (snap.net.ota == OtaState::Updating) {
+        return {0, ""};
+    }
     if (dialogOpen_) {
         return {app::input::kHoldActionMs, "TUTUP"};
     }
@@ -201,12 +236,36 @@ uint32_t Ui::viewKey(const UiSnapshot& snap) {
     k.add(static_cast<uint32_t>(snap.hour) * 60u + snap.minute);
     k.add(hot_ ? static_cast<uint32_t>(std::lround(snap.tempC)) : 0u);
     k.add(snap.holdProgressMs / 50u);  // bar tahan ~20 langkah per detik
+    k.add(static_cast<uint32_t>(snap.net.ota) | (static_cast<uint32_t>(snap.net.otaPct) << 8));
     UiContext ctx = context(snap);
     k.add(screen(current()).liveKey(ctx));
     return k.h;
 }
 
+void Ui::drawOta(Painter& p, const UiSnapshot& snap) const {
+    // Layar penuh selama firmware baru ditulis (OTA dari PlatformIO)
+    p.clear();
+    p.text(layout::kMargin, layout::kTitleY, "UPDATE", kT2, color::kText);
+    p.fill(layout::kMargin, 60, layout::kContentW, 40, color::kWarn);
+    p.icon(Icon::Warn, 12, 76, color::kText, true);
+    p.text(36, 66, "JANGAN MATIKAN", kT2, color::kText);
+    p.text(36, 86, "ALAT SAMPAI SELESAI", kT1, color::kText);
+    char pct[8];
+    std::snprintf(pct, sizeof(pct), "%u%%", static_cast<unsigned>(snap.net.otaPct));
+    drawProgress(p, layout::kMargin, 120, layout::kContentW, "FIRMWARE BARU LEWAT WIFI", pct,
+                 static_cast<float>(snap.net.otaPct) / 100.0f, color::kAccent);
+    p.text(layout::kMargin, 156, "ALAT MULAI ULANG SENDIRI SETELAH", kT1, color::kText);
+    p.text(layout::kMargin, 168, "UPDATE SELESAI. LAMPU MATI.", kT1, color::kText);
+    drawHint(p, "TOMBOL TIDAK AKTIF SELAMA UPDATE", 0, {0, ""});
+    p.clearParking();
+}
+
 void Ui::render(Painter& p, const UiSnapshot& snap) {
+    if (snap.net.ota == OtaState::Updating) {
+        drawOta(p, snap);
+        dirty_ = false;
+        return;
+    }
     UiContext ctx = context(snap);
     const Screen& s = screen(current());
     p.clear();

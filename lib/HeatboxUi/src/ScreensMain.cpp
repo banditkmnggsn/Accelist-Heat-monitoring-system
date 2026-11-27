@@ -1,4 +1,4 @@
-// Layar alur utama: Boot, Error SENSOR, Beranda, Riwayat, Pilih Profil
+// Layar alur utama: Boot, Error SENSOR, Beranda, Pilih Profil
 
 #include <app_config.h>
 
@@ -15,8 +15,8 @@ using namespace layout;
 namespace {
 
 constexpr uint8_t kDialogDoorOpen = 1;
-constexpr uint8_t kDialogNoCycle = 2;
 constexpr uint8_t kDialogSensor = 3;
+constexpr uint8_t kDialogInterrupted = 4;
 
 const char* const kBootLabels[5] = {"TIMBANGAN", "SENSOR SUHU", "PINTU", "WIFI", "JAM"};
 
@@ -103,10 +103,10 @@ void BootScreen::tick(UiContext& ctx) {
 
 void BootScreen::draw(Painter& p, const UiContext& ctx) const {
     const UiSnapshot& snap = ctx.snap;
-    p.text(kMargin, 18, "HEAT BOX", kT3, color::kText, kHeaderW);
+    p.text(kMargin, 20, "HEAT BOX", kT3, color::kText, kHeaderW);
     char version[40];
     std::snprintf(version, sizeof(version), "FW V%s " HB_DOT " MEMERIKSA SISTEM", app::kFirmwareVersion);
-    p.text(18, 46, version, kT1, p.style().secondaryColor());
+    p.text(18, 46, version, kT1, color::kSubText);
 
     for (uint8_t row = 0; row < revealed_; ++row) {
         const int16_t y = static_cast<int16_t>(60 + row * 22);
@@ -135,7 +135,7 @@ void BootScreen::draw(Painter& p, const UiContext& ctx) const {
             formatClock(snap, clock);
             std::snprintf(detail, sizeof(detail), "%s", clock);
         }
-        p.textRight(238, static_cast<int16_t>(y + 5), detail, kT1, p.style().secondaryColor());
+        p.textRight(238, static_cast<int16_t>(y + 5), detail, kT1, color::kSubText);
         p.hline(18, static_cast<int16_t>(y + 20), 220, 1, color::kGrid);
     }
 
@@ -194,7 +194,7 @@ void SensorErrorScreen::draw(Painter& p, const UiContext& ctx) const {
     p.text(12, 116, line2, kT2, color::kText);
     p.text(12, 136, "TES TIDAK BISA JALAN", kT2, color::kText);
 
-    p.text(12, 166, "LANGKAH OPERATOR", kT1, p.style().secondaryColor());
+    p.text(12, 166, "LANGKAH OPERATOR", kT1, color::kSubText);
     p.text(12, 178, "CEK KABEL, LALU TEKAN. KALAU", kT1, color::kText);
     p.text(12, 190, "TETAP GAGAL: HUBUNGI TEKNISI", kT1, color::kText);
 
@@ -206,6 +206,25 @@ void SensorErrorScreen::draw(Painter& p, const UiContext& ctx) const {
 // =====================================================================
 //  BERANDA (A, A2, 02-02b)
 // =====================================================================
+void HomeScreen::tick(UiContext& ctx) {
+    // Tes terputus (02-01d): dialog sekali setelah boot
+    const uint32_t id = ctx.snap.interruptedId;
+    if (id != 0 && id != interruptShownId_) {
+        interruptShownId_ = id;
+        std::snprintf(interruptTitle_, sizeof(interruptTitle_), "TES #%04u TERPUTUS", static_cast<unsigned>(id));
+        ctx.cmd.playSound(Sound::Warning, false);
+        ctx.nav.openDialog({kDialogInterrupted, DialogKind::Info, interruptTitle_,
+                            {"LISTRIK/ALAT MATI SAAT TES.", "HASIL TIDAK VALID, TERCATAT", "DI RIWAYAT SEBAGAI E-RESET."},
+                            "TEKAN:OK", {nullptr, nullptr}, false});
+    }
+}
+
+void HomeScreen::onDialogResult(UiContext& ctx, uint8_t id, bool) {
+    if (id == kDialogInterrupted) {
+        ctx.cmd.acknowledgeInterrupted();
+    }
+}
+
 void HomeScreen::onRotate(UiContext&, int8_t steps, bool) {
     const int next = static_cast<int>(cursor_) + steps;
     cursor_ = static_cast<uint8_t>(next < 0 ? 0 : (next > 2 ? 2 : next));
@@ -216,12 +235,6 @@ void HomeScreen::onPress(UiContext& ctx) {
     ctx.nav.push(kTargets[cursor_]);
 }
 
-void HomeScreen::onHold(UiContext& ctx) { ctx.nav.push(ScreenId::ServiceMenu); }
-
-HoldSpec HomeScreen::holdSpec(const UiContext&) const {
-    // 2 dtk di Beranda sengaja tidak berbuat apa-apa; servis 5 dtk
-    return {app::input::kHoldServiceMs, "SERVIS"};
-}
 
 void HomeScreen::draw(Painter& p, const UiContext& ctx) const {
     const UiSnapshot& snap = ctx.snap;
@@ -235,7 +248,7 @@ void HomeScreen::draw(Painter& p, const UiContext& ctx) const {
     // Kartu profil aktif 6, 68, 244, 38
     const uint8_t active = ctx.settings.activeProfile;
     p.frame(kMargin, 66, kContentW, 40, 2, color::kText);
-    p.text(11, 70, "PROFIL AKTIF", kT1, p.style().secondaryColor());
+    p.text(11, 70, "PROFIL AKTIF", kT1, color::kSubText);
     char name[12];
     std::snprintf(name, sizeof(name), "PROFIL %u", static_cast<unsigned>(active + 1));
     p.text(11, 84, name, kT2, color::kText);
@@ -250,10 +263,25 @@ void HomeScreen::draw(Painter& p, const UiContext& ctx) const {
         drawMenuRow(p, static_cast<int16_t>(110 + i * 20), 20, kItems[i], kT2, i == cursor_, kIcons[i], false);
     }
 
-    // Hasil terakhir 6, 180, 244, 30 (logger dibuat di Prompt 2)
+    // Hasil terakhir 6, 180, 244, 30
     p.hline(kMargin, 178, kContentW, 2, color::kGrid);
-    p.text(kMargin, 182, "HASIL TERAKHIR", kT1, p.style().secondaryColor());
-    p.text(kMargin, 191, "BELUM ADA TES", kT2, color::kText);
+    p.text(kMargin, 182, "HASIL TERAKHIR", kT1, color::kSubText);
+    if (!snap.hasLast) {
+        p.text(kMargin, 191, "BELUM ADA TES", kT2, color::kText);
+    } else {
+        const hbcycle::HistoryEntry& e = snap.last;
+        char line[24];
+        const char* status = e.status == hbcycle::Status::Ok        ? "OK"
+                             : e.status == hbcycle::Status::Timeout ? "TIMEOUT"
+                                                                     : hbcycle::reasonCode(e.reason);
+        if (e.hasMoisture) {
+            std::snprintf(line, sizeof(line), "#%04u %.2f%% %s", static_cast<unsigned>(e.id),
+                          static_cast<double>(e.moisturePct), status);
+        } else {
+            std::snprintf(line, sizeof(line), "#%04u %s", static_cast<unsigned>(e.id), status);
+        }
+        p.text(kMargin, 191, line, kT2, color::kText);
+    }
 
     if (ctx.hot) {
         char text[32];
@@ -261,16 +289,6 @@ void HomeScreen::draw(Painter& p, const UiContext& ctx) const {
                       static_cast<long>(std::lround(snap.tempC)));
         drawBanner(p, BannerKind::Heat, text);
     }
-}
-
-// =====================================================================
-//  RIWAYAT (kosong sampai logger ada di Prompt 2)
-// =====================================================================
-void HistoryScreen::draw(Painter& p, const UiContext& ctx) const {
-    drawHeader(p, ctx.snap, "RIWAYAT");
-    p.icon(Icon::History, 120, 90, color::kText, true);
-    p.textCenter(128, 110, "BELUM ADA TES", kT2, color::kText);
-    p.textCenter(128, 134, "HASIL TES AKAN MUNCUL DI SINI", kT1, p.style().secondaryColor());
 }
 
 // =====================================================================
@@ -320,9 +338,9 @@ void ProfileSelectScreen::onHold(UiContext& ctx) {
                             true});
         return;
     }
-    ctx.nav.openDialog({kDialogNoCycle, DialogKind::Info, "SIKLUS BELUM AKTIF",
-                        {"SIKLUS PENGERINGAN DIBUAT", "DI TAHAP BERIKUT.", nullptr}, "TEKAN:OK",
-                        {nullptr, nullptr}, false});
+    // MULAI: siklus diproses task sensor; layar tes mengikuti snap.cycle
+    ctx.cmd.startTest(ctx.settings);
+    ctx.nav.replace(ScreenId::TestRun);
 }
 
 HoldSpec ProfileSelectScreen::holdSpec(const UiContext&) const {
@@ -364,7 +382,7 @@ void ProfileSelectScreen::draw(Painter& p, const UiContext& ctx) const {
     std::snprintf(summary, sizeof(summary), "PRE-HEAT %uM " HB_DOT " MIN %uM " HB_DOT " MAKS %uM",
                   static_cast<unsigned>(s.general.preheatMin), static_cast<unsigned>(s.general.minHeatMin),
                   static_cast<unsigned>(s.general.maxHeatMin));
-    p.text(kMargin, 152, summary, kT1, p.style().secondaryColor());
+    p.text(kMargin, 152, summary, kT1, color::kSubText);
 
     // Kesiapan: cawan = pengingat operator (tidak ada sensornya), pintu = saklar
     drawCheckBox(p, kMargin, 166, CheckMark::Empty);

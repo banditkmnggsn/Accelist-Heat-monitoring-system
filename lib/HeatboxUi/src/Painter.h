@@ -3,7 +3,7 @@
 // =====================================================================
 //  Painter.h — pembungkus Adafruit_GFX untuk aturan design system
 //
-//  - Semua teks ditulis KAPITAL (sesuai desain) dengan font bawaan 5x7
+//  - Semua teks ditulis KAPITAL (sesuai desain; kecuali textExact) dengan font bawaan 5x7
 //    dan cp437(true) supaya simbol ° ± · → √ ◄ ► benar.
 //  - Teks dipotong supaya tidak melewati margin kanan (atau lebar yang
 //    diberikan), sehingga batas karakter T1 40 / T2 20 / T3 13 / T4 10
@@ -21,10 +21,9 @@ namespace hbui {
 
 class Painter {
 public:
-    Painter(Adafruit_GFX& gfx, const UiStyle& style);
+    explicit Painter(Adafruit_GFX& gfx);
 
     Adafruit_GFX& gfx() const { return gfx_; }
-    const UiStyle& style() const { return style_; }
 
     void clear();
     void fill(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t c);
@@ -38,6 +37,8 @@ public:
 
     // maxW 0 = sampai margin kanan layar. Return x setelah teks.
     int16_t text(int16_t x, int16_t y, const char* s, uint8_t size, uint8_t c, int16_t maxW = 0);
+    // Sama dengan text() tetapi huruf kecil TIDAK dikapitalkan (SSID, sandi WiFi)
+    int16_t textExact(int16_t x, int16_t y, const char* s, uint8_t size, uint8_t c, int16_t maxW = 0);
     void textRight(int16_t right, int16_t y, const char* s, uint8_t size, uint8_t c);
     void textCenter(int16_t centerX, int16_t y, const char* s, uint8_t size, uint8_t c);
 
@@ -47,8 +48,9 @@ public:
     void clearParking();
 
 private:
+    int16_t drawText(int16_t x, int16_t y, const char* s, uint8_t size, uint8_t c, int16_t maxW, bool upper);
+
     Adafruit_GFX& gfx_;
-    const UiStyle& style_;
 };
 
 }  // namespace hbui

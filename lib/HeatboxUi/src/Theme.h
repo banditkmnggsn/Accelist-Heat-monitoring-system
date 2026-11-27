@@ -46,8 +46,8 @@ constexpr int16_t kParkH = 43;           // y 0..42
 
 // Header hanya di kiri (x 6..150)
 constexpr int16_t kHeaderW = 144;
-constexpr int16_t kStatusY = 6;   // ikon WiFi + jam + ikon pintu
-constexpr int16_t kTitleY = 20;   // judul T2
+constexpr int16_t kStatusY = 16;  // ikon WiFi + jam + ikon pintu (monitor memotong +-12 baris atas)
+constexpr int16_t kTitleY = 28;   // judul T2, y 28..43
 
 constexpr int16_t kContentY = 48;     // isi mulai di bawah zona PARKING
 constexpr int16_t kBannerY = 206;     // banner peringatan, tinggi 12
@@ -80,19 +80,13 @@ constexpr int16_t kStepBoxW = 48;
 #define HB_LEFT   "\x11"  // ◄
 #define HB_RIGHT  "\x10"  // ►
 
-// ---- varian yang masih diuji di SERVIS > UJI TAMPILAN ----
-// Bawaan = usulan utama. Pilihan berlaku di RAM sampai restart; yang
-// dipilih operator nanti dijadikan bawaan di kode.
-enum class SelectStyle : uint8_t { BlueBlock, BlackBlock, ThickFrame, Count };
-enum class SecondaryStyle : uint8_t { Gray, Black, Count };
+#define HB_OHM    "\xEA"  // Ω
 
-struct UiStyle {
-    SelectStyle select = SelectStyle::BlueBlock;
-    SecondaryStyle secondary = SecondaryStyle::Gray;
-
-    uint8_t secondaryColor() const {
-        return secondary == SecondaryStyle::Gray ? color::kSecondary : color::kText;
-    }
-};
+// Gaya tetap (pilihan uji LCD 6 Nov 2026, varian lain sudah dihapus):
+//   pilihan aktif = BINGKAI TEBAL 2 px + ">" ; teks sekunder = HITAM
+//   (teks abu dan blok biru kurang jelas di monitor ini).
+namespace color {
+constexpr uint8_t kSubText = kText;
+}  // namespace color
 
 }  // namespace hbui

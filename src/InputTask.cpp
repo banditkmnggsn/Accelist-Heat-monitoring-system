@@ -36,8 +36,6 @@ void InputTask::begin(bool soundOn) {
     const int doorLevel = digitalRead(PIN_DOOR);
     door_.reset(doorClosedLevel(doorLevel), now);
     doorClosed_.store(door_.state());
-    diag_.stepsPerDetent = decoder_.stepsPerDetent();
-    diag_.doorPinHigh = doorLevel == HIGH;
 
     queue_ = xQueueCreate(kQueueLength, sizeof(hbinput::InputEvent));
     xTaskCreatePinnedToCore(entry, "input", app::task::kInputStackBytes, this, app::task::kInputPriority,
@@ -64,8 +62,7 @@ void InputTask::poll(uint32_t nowMs) {
 
     const int8_t step = decoder_.update(readAB());
     const bool pressed = button_.update(digitalRead(PIN_ENC_SW) == LOW, nowMs);
-    const int doorLevel = digitalRead(PIN_DOOR);
-    doorClosed_.store(door_.update(doorClosedLevel(doorLevel), nowMs));
+    doorClosed_.store(door_.update(doorClosedLevel(digitalRead(PIN_DOOR)), nowMs));
 
     gesture_.setHoldTarget(holdTarget_.load());
     const bool wasDown = gesture_.isDown();
@@ -91,46 +88,10 @@ void InputTask::poll(uint32_t nowMs) {
         xQueueSend(queue_, &event, 0);
         buttonLatch_.store('L');
     }
-
-    portENTER_CRITICAL(&diagLock_);
-    if (!wasDown && pressed) {
-        pressStartMs_ = nowMs;
-    }
-    if (wasDown && !gesture_.isDown()) {
-        diag_.lastHoldMs = nowMs - pressStartMs_;
-    }
-    if (rotateAccepted) {
-        if (diag_.lastDir != 0 && step != diag_.lastDir &&
-            (nowMs - lastClickMs_) < app::input::kReverseSuspectMs) {
-            ++diag_.reverseSuspect;
-        }
-        diag_.lastDir = step;
-        diag_.rawPerClick = decoder_.rawCount() - rawAtLastClick_;
-        lastClickMs_ = nowMs;
-    }
-    if (step != 0) {
-        rawAtLastClick_ = decoder_.rawCount();
-    }
-    diag_.detents = detents_.load();
-    diag_.raw = decoder_.rawCount();
-    diag_.invalidJumps = decoder_.invalidJumps();
-    diag_.partialReturns = decoder_.partialReturns();
-    diag_.pressed = gesture_.isDown();
-    diag_.cancelled = gesture_.wasCancelled();
-    diag_.pressedMs = gesture_.isDown() ? nowMs - pressStartMs_ : 0;
-    diag_.doorPinHigh = doorLevel == HIGH;
-    portEXIT_CRITICAL(&diagLock_);
 }
 
 bool InputTask::nextEvent(hbinput::InputEvent& out) {
     return queue_ != nullptr && xQueueReceive(queue_, &out, 0) == pdTRUE;
-}
-
-hbui::InputDiag InputTask::diag() {
-    portENTER_CRITICAL(&diagLock_);
-    const hbui::InputDiag copy = diag_;
-    portEXIT_CRITICAL(&diagLock_);
-    return copy;
 }
 
 char InputTask::takeButtonChar() {

@@ -70,12 +70,15 @@
 // pin hanya dipesan supaya tidak dialokasikan untuk hal lain.
 #define PIN_START_BTN 35
 
-// Buzzer BZ1 5 V PASIF lewat Q3 BC337 low-side (sheet 5): HIGH = bunyi.
+// Buzzer BZ1 5 V lewat Q3 BC337 low-side (sheet 5): HIGH = bunyi.
+// 26 Nov 2026: yang terpasang buzzer AKTIF (berosilator sendiri). Tetap
+// dibunyikan lewat PWM LEDC: frekuensi PWM memotong-motong osilator
+// internalnya, jadi warna nada masih bisa diatur sedikit (src/sounds.h).
 // R27 10k menahan GPIO12 LOW saat boot (strapping MTDI wajib LOW, kalau
 // tidak flash diberi 1,8 V dan ESP32 gagal boot). D3 1N4002 = flyback.
 #define PIN_BUZZER          12
 #define BUZZER_ACTIVE_LOW   0   // 0: HIGH = transistor ON (sesuai skematik)
-#define BUZZER_PASSIVE      1   // 1: nada dari PWM LEDC (buzzer magnetik pasif)
+#define BUZZER_PASSIVE      0   // 0: buzzer aktif (tetap digerakkan PWM LEDC)
 
 // ---------------------------------------------------------------------
 //  Pemanas (board Power, sheet Heatlamp) — BC337 low-side, HIGH = NYALA.

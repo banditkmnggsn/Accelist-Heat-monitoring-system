@@ -4,7 +4,7 @@
 
 namespace hbui {
 
-Painter::Painter(Adafruit_GFX& gfx, const UiStyle& style) : gfx_(gfx), style_(style) {
+Painter::Painter(Adafruit_GFX& gfx) : gfx_(gfx) {
     gfx_.cp437(true);
     gfx_.setTextWrap(false);
 }
@@ -34,6 +34,14 @@ int16_t Painter::textWidth(const char* s, uint8_t size) {
 }
 
 int16_t Painter::text(int16_t x, int16_t y, const char* s, uint8_t size, uint8_t c, int16_t maxW) {
+    return drawText(x, y, s, size, c, maxW, true);
+}
+
+int16_t Painter::textExact(int16_t x, int16_t y, const char* s, uint8_t size, uint8_t c, int16_t maxW) {
+    return drawText(x, y, s, size, c, maxW, false);
+}
+
+int16_t Painter::drawText(int16_t x, int16_t y, const char* s, uint8_t size, uint8_t c, int16_t maxW, bool upper) {
     const int16_t limit = (maxW > 0) ? static_cast<int16_t>(x + maxW) : layout::kRight;
     gfx_.setTextSize(size);
     gfx_.setTextColor(c);
@@ -44,7 +52,7 @@ int16_t Painter::text(int16_t x, int16_t y, const char* s, uint8_t size, uint8_t
             break;
         }
         char ch = *p;
-        if (ch >= 'a' && ch <= 'z') {
+        if (upper && ch >= 'a' && ch <= 'z') {
             ch = static_cast<char>(ch - 'a' + 'A');
         }
         gfx_.drawChar(cx, y, static_cast<unsigned char>(ch), c, c, size);

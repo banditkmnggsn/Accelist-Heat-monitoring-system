@@ -1,33 +1,12 @@
 #include "Widgets.h"
 
+#include <cmath>
 #include <cstdio>
+#include <ctime>
 
 namespace hbui {
 
-namespace {
-
 using namespace layout;
-
-struct SelectColors {
-    uint8_t fill;   // kBg = tanpa blok
-    uint8_t text;
-    uint8_t frame;  // kBg = tanpa bingkai
-};
-
-SelectColors selectColors(const UiStyle& style) {
-    switch (style.select) {
-        case SelectStyle::BlackBlock:
-            return {color::kText, color::kBg, color::kBg};
-        case SelectStyle::ThickFrame:
-            return {color::kBg, color::kText, color::kText};
-        case SelectStyle::BlueBlock:
-        case SelectStyle::Count:
-            break;
-    }
-    return {color::kAccent, color::kBg, color::kBg};
-}
-
-}  // namespace
 
 void formatClock(const UiSnapshot& snap, char (&out)[8]) {
     if (!snap.clockSynced) {
@@ -46,6 +25,9 @@ void drawHeader(Painter& p, const UiSnapshot& snap, const char* title) {
     p.text(18, kStatusY, clock, kT1, color::kText, 48);
     if (!snap.doorClosed) {
         p.icon(Icon::Door, 72, kStatusY, color::kText, false);
+    }
+    if (snap.simulation) {
+        p.text(88, kStatusY, "SIM", kT1, color::kError);
     }
     if (title != nullptr) {
         p.text(kMargin, kTitleY, title, kT2, color::kText, kHeaderW);
@@ -88,16 +70,11 @@ void drawBanner(Painter& p, BannerKind kind, const char* text) {
 
 uint8_t drawMenuRow(Painter& p, int16_t y, int16_t h, const char* label, uint8_t size, bool selected,
                  Icon iconOrNone, bool locked) {
-    uint8_t ink = locked ? p.style().secondaryColor() : color::kText;
+    uint8_t ink = locked ? color::kSubText : color::kText;
     if (selected) {
-        const SelectColors sc = selectColors(p.style());
-        if (sc.fill != color::kBg) {
-            p.fill(kMargin, y, kContentW, h, sc.fill);
-        }
-        if (sc.frame != color::kBg) {
-            p.frame(kMargin, y, kContentW, h, 2, sc.frame);
-        }
-        ink = sc.text;
+        // Pilihan aktif = bingkai tebal 2 px + ">" (Theme.h)
+        p.frame(kMargin, y, kContentW, h, 2, color::kText);
+        ink = color::kText;
         p.text(kMargin + 4, static_cast<int16_t>(y + (h - 8 * size) / 2), ">", size, ink);
     }
     int16_t textX = static_cast<int16_t>(kMargin + 6 + Painter::charWidth(size));
@@ -159,7 +136,7 @@ void drawStepper(Painter& p, int16_t y, uint8_t currentStep) {
             std::snprintf(label, sizeof(label), "%s", kLabels[i]);
         } else {
             p.frame(x, y, kStepBoxW, kStepperH, 1, color::kGrid);
-            ink = p.style().secondaryColor();
+            ink = color::kSubText;
             std::snprintf(label, sizeof(label), "%s", kLabels[i]);
         }
         p.textCenter(static_cast<int16_t>(x + kStepBoxW / 2), static_cast<int16_t>(y + (kStepperH - 8) / 2),
@@ -184,7 +161,7 @@ void drawValueBox(Painter& p, int16_t x, int16_t y, int16_t w, int16_t h, const 
             p.frame(x, y, w, h, 2, color::kText);
             break;
     }
-    const uint8_t labelInk = (state == BoxState::Normal) ? p.style().secondaryColor() : color::kText;
+    const uint8_t labelInk = (state == BoxState::Normal) ? color::kSubText : color::kText;
     char shownLabel[40];
     std::snprintf(shownLabel, sizeof(shownLabel), "%s%s", state == BoxState::Selected ? "> " : "", label);
     p.text(static_cast<int16_t>(x + 6), static_cast<int16_t>(y + 5), shownLabel, kT1, labelInk,
@@ -249,21 +226,338 @@ void drawDialog(Painter& p, const DialogSpec& spec, uint8_t selectedOption) {
         p.text(kDialogX + 8, bottomY + 8, spec.hint, kT1, color::kText, kDialogW - 16);
         return;
     }
-    const SelectColors sc = selectColors(p.style());
     const int16_t buttonW = (kDialogW - 24) / 2;
     for (uint8_t i = 0; i < 2; ++i) {
         const int16_t bx = static_cast<int16_t>(kDialogX + 8 + i * (buttonW + 8));
         const int16_t by = bottomY + 5;
-        uint8_t ink = color::kText;
         if (i == selectedOption) {
-            if (sc.fill != color::kBg) p.fill(bx, by, buttonW, 14, sc.fill);
-            p.frame(bx, by, buttonW, 14, 2, sc.frame != color::kBg ? sc.frame : sc.fill);
-            ink = sc.text;
+            p.frame(bx, by, buttonW, 14, 2, color::kText);
         } else {
             p.frame(bx, by, buttonW, 14, 1, color::kGrid);
         }
-        p.textCenter(static_cast<int16_t>(bx + buttonW / 2), by + 3, spec.options[i], kT1, ink);
+        p.textCenter(static_cast<int16_t>(bx + buttonW / 2), by + 3, spec.options[i], kT1, color::kText);
     }
+}
+
+// =====================================================================
+//  Komponen layar tes, hasil, riwayat
+// =====================================================================
+void formatMinSecTo(float seconds, char* out, size_t size) {
+    if (!(seconds >= 0.0f)) {
+        std::snprintf(out, size, "--:--");
+        return;
+    }
+    unsigned total = static_cast<unsigned>(seconds);
+    if (total > 99u * 60u + 59u) total = 99u * 60u + 59u;
+    std::snprintf(out, size, "%02u:%02u", total / 60u, total % 60u);
+}
+
+void formatDate(uint32_t epoch, char (&date)[10], char (&clock)[6]) {
+    if (epoch == 0) {
+        std::snprintf(date, sizeof(date), "--/--/--");
+        std::snprintf(clock, sizeof(clock), "--:--");
+        return;
+    }
+    const time_t t = static_cast<time_t>(epoch) + 7 * 3600;  // WIB = UTC+7
+    struct tm tmv;
+    gmtime_r(&t, &tmv);
+    std::snprintf(date, sizeof(date), "%02u/%02u/%02u", static_cast<unsigned>(tmv.tm_mday) % 100u,
+                  static_cast<unsigned>(tmv.tm_mon + 1) % 100u, static_cast<unsigned>(tmv.tm_year) % 100u);
+    std::snprintf(clock, sizeof(clock), "%02u:%02u", static_cast<unsigned>(tmv.tm_hour) % 100u,
+                  static_cast<unsigned>(tmv.tm_min) % 100u);
+}
+
+void formatPercentTo(float value, char* out, size_t size) {
+    if (!std::isfinite(value)) {
+        std::snprintf(out, size, "--.--");
+        return;
+    }
+    std::snprintf(out, size, "%.2f", static_cast<double>(value));
+}
+
+void drawPageMarker(Painter& p, int16_t y, uint8_t page, uint8_t count) {
+    char text[8];
+    std::snprintf(text, sizeof(text), "%u/%u", static_cast<unsigned>(page + 1), static_cast<unsigned>(count));
+    const int16_t textW = Painter::textWidth(text, kT1);
+    p.textRight(kRight, static_cast<int16_t>(y + 3), text, kT1, color::kText);
+    int16_t x = static_cast<int16_t>(kRight - textW - 4 - count * 8 + 2);
+    for (uint8_t i = 0; i < count; ++i, x = static_cast<int16_t>(x + 8)) {
+        if (i == page) {
+            p.fill(x, static_cast<int16_t>(y + 3), 6, 7, color::kText);
+        } else {
+            p.frame(x, static_cast<int16_t>(y + 3), 6, 7, 1, color::kText);
+        }
+    }
+}
+
+void drawProgress(Painter& p, int16_t x, int16_t y, int16_t w, const char* label, const char* value,
+                  float fraction, uint8_t fill) {
+    p.text(x, y, label, kT1, color::kText, static_cast<int16_t>(w - Painter::textWidth(value, kT1) - 6));
+    p.textRight(static_cast<int16_t>(x + w), y, value, kT1, color::kText);
+    p.frame(x, static_cast<int16_t>(y + 10), w, 12, 2, color::kText);
+    if (!(fraction > 0.0f)) return;
+    if (fraction > 1.0f) fraction = 1.0f;
+    const int16_t fw = static_cast<int16_t>(static_cast<float>(w - 4) * fraction);
+    p.fill(static_cast<int16_t>(x + 2), static_cast<int16_t>(y + 12), fw, 8, fill);
+}
+
+void drawDataRows(Painter& p, int16_t y, int16_t rowH, const DataRow* rows, uint8_t count, uint8_t valueSize) {
+    for (uint8_t i = 0; i < count; ++i) {
+        const int16_t ry = static_cast<int16_t>(y + i * rowH);
+        p.text(kMargin, static_cast<int16_t>(ry + (rowH - 8) / 2 - 1), rows[i].label, kT1, color::kText, 110);
+        p.textRight(kRight, static_cast<int16_t>(ry + (rowH - 8 * valueSize) / 2 - 1), rows[i].value, valueSize,
+                    color::kText);
+        p.hline(kMargin, static_cast<int16_t>(ry + rowH - 1), kContentW, 1, color::kGrid);
+    }
+}
+
+void drawErrorBlock(Painter& p, const char* code, const char* const (&lines)[3], const char* step) {
+    p.fill(kMargin, 48, kContentW, 36, color::kError);
+    p.icon(Icon::Cross, 12, 62, color::kBg, true);
+    p.text(36, 52, "ERROR", kT2, color::kBg);
+    p.text(36, 72, code, kT1, color::kBg);
+    for (uint8_t i = 0; i < 3; ++i) {
+        if (lines[i] != nullptr) {
+            p.text(12, static_cast<int16_t>(96 + i * 20), lines[i], kT2, color::kText);
+        }
+    }
+    p.text(12, 166, "LANGKAH OPERATOR", kT1, color::kSubText);
+    p.text(12, 178, step, kT1, color::kText);
+}
+
+namespace {
+
+void dashedV(Painter& p, int16_t x, int16_t y0, int16_t y1, uint8_t c) {
+    for (int16_t y = y0; y < y1; y = static_cast<int16_t>(y + 5)) {
+        p.fill(x, y, 1, (y1 - y) < 3 ? static_cast<int16_t>(y1 - y) : 3, c);
+    }
+}
+
+void dashedH(Painter& p, int16_t x0, int16_t x1, int16_t y, uint8_t c) {
+    for (int16_t x = x0; x < x1; x = static_cast<int16_t>(x + 6)) {
+        p.fill(x, y, (x1 - x) < 3 ? static_cast<int16_t>(x1 - x) : 3, 1, c);
+    }
+}
+
+}  // namespace
+
+void drawGraph(Painter& p, int16_t x, int16_t y, int16_t w, int16_t h, const GraphSpec& spec) {
+    const hbcycle::CycleResult& r = *spec.result;
+    const float w0 = r.w0Mg;
+    const uint8_t n = r.minuteCount;
+
+    // Nilai titik per menit
+    auto valueAt = [&](uint8_t k) -> float {
+        if (spec.temperature) return r.minutes[k].tempC;
+        const float m = r.minutes[k].massMg;
+        return (std::isfinite(m) && w0 > 0.0f) ? (w0 - m) / w0 * 100.0f : NAN;
+    };
+    float lo = spec.temperature ? static_cast<float>(r.heatC) - 30.0f : 0.0f;
+    float hi = spec.temperature ? static_cast<float>(r.heatC) + 4.0f : 1.0f;
+    for (uint8_t k = 0; k < n; ++k) {
+        const float v = valueAt(k);
+        if (!std::isfinite(v)) continue;
+        if (v > hi) hi = v;
+        if (v < lo) lo = v;
+    }
+    if (spec.temperature) {
+        lo = std::floor(lo / 10.0f) * 10.0f;
+        hi = std::ceil(hi / 2.0f) * 2.0f;
+    } else {
+        hi = std::ceil(hi);
+    }
+    if (hi - lo < 1.0f) hi = lo + 1.0f;
+
+    // Area plot
+    const int16_t px = static_cast<int16_t>(x + 22);
+    const int16_t py = static_cast<int16_t>(y + 12);
+    const int16_t pw = static_cast<int16_t>(w - 26);
+    const int16_t ph = static_cast<int16_t>(h - 24);
+    const float xMax = spec.xMaxMin > 1.0f ? spec.xMaxMin : 1.0f;
+    auto X = [&](float t) {
+        const float c = t < 0.0f ? 0.0f : (t > xMax ? xMax : t);
+        return static_cast<int16_t>(px + c / xMax * pw);
+    };
+    auto Y = [&](float v) {
+        float f = (v - lo) / (hi - lo);
+        if (f < 0.0f) f = 0.0f;
+        if (f > 1.0f) f = 1.0f;
+        return static_cast<int16_t>(py + ph - f * ph);
+    };
+
+    // Sumbu + label
+    p.text(x, y, spec.temperature ? HB_DEG "C" : "% SUSUT", kT1, color::kText);
+    p.fill(px, py, 1, static_cast<int16_t>(ph + 1), color::kText);
+    p.fill(px, static_cast<int16_t>(py + ph), static_cast<int16_t>(pw + 1), 1, color::kText);
+    char label[8];
+    std::snprintf(label, sizeof(label), "%d", static_cast<int>(std::lround(hi)));
+    p.textRight(static_cast<int16_t>(px - 3), py, label, kT1, color::kText);
+    std::snprintf(label, sizeof(label), "%d", static_cast<int>(std::lround(lo)));
+    p.textRight(static_cast<int16_t>(px - 3), static_cast<int16_t>(py + ph - 7), label, kT1, color::kText);
+    p.text(px, static_cast<int16_t>(py + ph + 4), "0", kT1, color::kText);
+    std::snprintf(label, sizeof(label), "%dMNT", static_cast<int>(std::lround(xMax)));
+    p.textRight(static_cast<int16_t>(px + pw), static_cast<int16_t>(py + ph + 4), label, kT1, color::kText);
+
+    // Garis target suhu
+    if (spec.temperature) {
+        dashedH(p, static_cast<int16_t>(px + 1), static_cast<int16_t>(px + pw), Y(static_cast<float>(r.heatC)),
+                color::kSubText);
+    }
+    // Penanda Fase A dan STOP
+    // Label A di bawah plot, STOP di atas, supaya tidak saling menimpa
+    // walaupun keduanya berdekatan.
+    if (spec.phaseAMin >= 0.0f) {
+        const int16_t mx = X(spec.phaseAMin);
+        dashedV(p, mx, py, static_cast<int16_t>(py + ph), color::kText);
+        p.textRight(static_cast<int16_t>(mx - 2), static_cast<int16_t>(py + ph - 9), "A", kT1, color::kText);
+    }
+    if (spec.stopMin >= 0.0f) {
+        const int16_t mx = X(spec.stopMin);
+        dashedV(p, mx, py, static_cast<int16_t>(py + ph), color::kText);
+        if (mx + 2 + Painter::textWidth("STOP", kT1) <= px + pw) {
+            p.text(static_cast<int16_t>(mx + 2), py, "STOP", kT1, color::kText);
+        } else {
+            p.textRight(static_cast<int16_t>(mx - 2), py, "STOP", kT1, color::kText);
+        }
+    }
+
+    // Model (% susut): garis biru dari awal jendela fit; putus-putus setelah data
+    if (!spec.temperature && spec.model && std::isfinite(r.tauMin) && r.tauMin > 0.0f && w0 > 0.0f) {
+        const float tLast = n > 0 ? static_cast<float>(n) - 0.5f : 0.0f;
+        const float tEnd = spec.stopMin > tLast ? spec.stopMin : tLast;
+        int16_t lastX = -1;
+        int16_t lastY = -1;
+        for (int16_t sx = X(r.fitT0Min); sx <= X(tEnd); ++sx) {
+            const float t = (static_cast<float>(sx - px) / pw) * xMax;
+            const float m = r.mInfMg + r.amplitudeMg * std::exp(-(t - r.fitT0Min) / r.tauMin);
+            const int16_t sy = Y((w0 - m) / w0 * 100.0f);
+            const bool dashed = t > tLast && ((sx / 3) % 2 == 1);
+            if (lastX >= 0 && !dashed) {
+                p.gfx().drawLine(lastX, lastY, sx, sy, color::kAccent);
+                p.gfx().drawLine(lastX, static_cast<int16_t>(lastY + 1), sx, static_cast<int16_t>(sy + 1),
+                                 color::kAccent);
+            }
+            lastX = sx;
+            lastY = sy;
+        }
+    }
+
+    // Data: suhu = garis 2 px; susut = titik 4x4
+    int16_t prevX = -1;
+    int16_t prevY = -1;
+    for (uint8_t k = 0; k < n; ++k) {
+        const float v = valueAt(k);
+        if (!std::isfinite(v)) {
+            prevX = -1;
+            continue;
+        }
+        const int16_t dx = X(static_cast<float>(k) + 0.5f);
+        const int16_t dy = Y(v);
+        if (spec.temperature) {
+            if (prevX >= 0) {
+                p.gfx().drawLine(prevX, prevY, dx, dy, color::kText);
+                p.gfx().drawLine(prevX, static_cast<int16_t>(prevY + 1), dx, static_cast<int16_t>(dy + 1),
+                                 color::kText);
+            } else {
+                p.fill(dx, dy, 2, 2, color::kText);
+            }
+        } else {
+            p.fill(static_cast<int16_t>(dx - 2), static_cast<int16_t>(dy - 2), 4, 4, color::kText);
+        }
+        prevX = dx;
+        prevY = dy;
+    }
+}
+
+void drawCancelDialog(Painter& p, uint32_t heldMs, uint32_t targetMs) {
+    const int16_t x = 18;
+    const int16_t y = 76;
+    const int16_t w = 220;
+    const int16_t h = 112;
+    p.fill(x, y, w, h, color::kBg);
+    p.frame(x, y, w, h, 2, color::kText);
+    p.text(static_cast<int16_t>(x + 10), static_cast<int16_t>(y + 10), "BATALKAN TES?", kT2, color::kText);
+    p.text(static_cast<int16_t>(x + 10), static_cast<int16_t>(y + 34), "TETAP TAHAN TOMBOL ROTARY", kT1,
+           color::kText);
+    float fraction = targetMs > 0 ? static_cast<float>(heldMs) / static_cast<float>(targetMs) : 0.0f;
+    if (fraction > 1.0f) fraction = 1.0f;
+    char pct[8];
+    std::snprintf(pct, sizeof(pct), "%d%%", static_cast<int>(fraction * 100.0f));
+    char label[20];
+    std::snprintf(label, sizeof(label), "TAHAN %u DTK", static_cast<unsigned>((targetMs + 500) / 1000));
+    drawProgress(p, static_cast<int16_t>(x + 10), static_cast<int16_t>(y + 52), static_cast<int16_t>(w - 20), label,
+                 pct, fraction, color::kWarn);
+    p.text(static_cast<int16_t>(x + 10), static_cast<int16_t>(y + 90), "LEPAS: LANJUT TES", kT1, color::kText);
+}
+
+// =====================================================================
+//  Daftar bergulir
+// =====================================================================
+void ListCursor::rotate(int8_t steps, uint8_t count, uint8_t rows) {
+    if (count == 0) {
+        cursor = 0;
+        top = 0;
+        return;
+    }
+    const int next = static_cast<int>(cursor) + steps;
+    cursor = static_cast<uint8_t>(next < 0 ? 0 : (next >= count ? count - 1 : next));
+    clamp(count, rows);
+}
+
+void ListCursor::clamp(uint8_t count, uint8_t rows) {
+    if (count == 0) {
+        cursor = 0;
+        top = 0;
+        return;
+    }
+    if (cursor >= count) cursor = static_cast<uint8_t>(count - 1);
+    if (cursor < top) top = cursor;
+    if (cursor >= top + rows) top = static_cast<uint8_t>(cursor - rows + 1);
+    if (count <= rows) top = 0;
+}
+
+void drawScrollRail(Painter& p, int16_t y, int16_t h, uint8_t top, uint8_t rows, uint8_t count) {
+    if (count <= rows) return;
+    p.fill(252, y, 3, h, color::kGrid);
+    const int16_t thumbH = static_cast<int16_t>(h * rows / count);
+    const int16_t thumbY = static_cast<int16_t>(y + (h - thumbH) * top / (count - rows));
+    p.fill(252, thumbY, 3, thumbH, color::kText);
+}
+
+void drawMenuList(Painter& p, int16_t y, int16_t rowH, uint8_t rows, const ListCursor& list, uint8_t count,
+                  const char* (*labelOf)(uint8_t index, const UiContext& ctx), const UiContext& ctx,
+                  bool (*lockedOf)(uint8_t index, const UiContext& ctx)) {
+    for (uint8_t row = 0; row < rows && list.top + row < count; ++row) {
+        const uint8_t i = static_cast<uint8_t>(list.top + row);
+        const int16_t ry = static_cast<int16_t>(y + row * rowH);
+        const bool locked = lockedOf != nullptr && lockedOf(i, ctx);
+        drawMenuRow(p, ry, static_cast<int16_t>(rowH - 2), labelOf(i, ctx), kT2, i == list.cursor, Icon::Count,
+                    locked);
+        if (i != list.cursor) {
+            p.hline(kMargin, static_cast<int16_t>(ry + rowH - 2), kContentW, 1, color::kGrid);
+        }
+    }
+    drawScrollRail(p, y, static_cast<int16_t>(rows * rowH - 2), list.top, rows, count);
+}
+
+void formatGramsTo(float grams, char* out, size_t size) {
+    if (!std::isfinite(grams)) {
+        std::snprintf(out, size, "--- G");
+        return;
+    }
+    std::snprintf(out, size, "%.4f G", static_cast<double>(grams));
+}
+
+const char* scaleStatusText(const ScaleInfo& s) {
+    switch (s.status) {
+        case ScaleStatus::NoData: return "TIDAK ADA DATA";
+        case ScaleStatus::DoutError: return "GALAT DATA";
+        case ScaleStatus::Settling: return "MENYIAPKAN";
+        case ScaleStatus::Clipped: return "DI LUAR RENTANG";
+        case ScaleStatus::Busy: return "SIBUK";
+        case ScaleStatus::Ok: break;
+    }
+    return s.stable ? "STABIL" : "BERGERAK";
 }
 
 }  // namespace hbui

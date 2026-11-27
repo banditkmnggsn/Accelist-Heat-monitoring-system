@@ -16,7 +16,7 @@ LIBS="lib/HeatboxCycle/src lib/HeatboxInput/src"
 INC=""; SRC=""
 for d in $LIBS; do INC="$INC -I $d"; SRC="$SRC $d/*.cpp"; done
 FAILED=0
-for S in test_drying_math test_cycle_aggregation test_settings test_input; do
+for S in test_drying_math test_cycle_aggregation test_settings test_input test_cycle test_advanced; do
     echo "=== $S"
     if ! g++ -std=gnu++17 -Wall -Wextra -Werror -O1 $INC -I "$UNITY" \
             "test/$S/$S.cpp" $SRC "$UNITY/unity.c" -o "$OUT/$S" 2> "$OUT/$S.build.log"; then

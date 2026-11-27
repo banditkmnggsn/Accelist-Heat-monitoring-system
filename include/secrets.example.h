@@ -11,4 +11,7 @@
 
 #define WIFI_SSID "nama-wifi"
 #define WIFI_PASS "kata-sandi-wifi"
-#define OTA_PASS  ""  // OTA dibuat di Prompt 2
+// Sandi update firmware lewat WiFi (OTA). KOSONG = OTA mati. Isi lalu
+// upload sekali lewat USB; setelah itu bisa: set HEATBOX_OTA_PASS=<sandi>
+// dan pio run -e ota -t upload (lihat platformio.ini).
+#define OTA_PASS  ""

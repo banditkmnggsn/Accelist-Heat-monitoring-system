@@ -25,15 +25,21 @@
 #include <RtdSensor.h>
 #include <SecondAggregator.h>
 
+#include <esp_task_wdt.h>
+
 #include <cctype>
 #include <cinttypes>
 #include <cmath>
 #include <cstdarg>
 #include <cstdlib>
+#include <cstring>
 
+#include "CycleService.h"
 #include "HardwareSensors.h"
 #include "InputTask.h"
 #include "NetClock.h"
+#include "OtaService.h"
+#include "TestLog.h"
 #include "app_config.h"
 #include "pins.h"
 
@@ -53,6 +59,7 @@ Ads1232 loadCell({PIN_ADS_SCLK, PIN_ADS_DOUT, PIN_ADS_PDWN});
 
 InputTask* input = nullptr;
 NetClock* net = nullptr;
+TestLog* testLog = nullptr;
 const std::atomic<uint32_t>* renderCount = nullptr;
 
 bool doorClosedNow() { return input != nullptr && input->doorClosed(); }
@@ -90,6 +97,22 @@ std::atomic<bool> scaleOk{false};
 std::atomic<bool> tempOk{false};
 std::atomic<float> tempC{NAN};
 std::atomic<bool> recheckRequested{false};
+
+// ---- OPSI PENGEMBANG: detail sensor + aksi timbangan dari LCD ----
+portMUX_TYPE detailLock = portMUX_INITIALIZER_UNLOCKED;
+hbui::ScaleInfo scaleDetail{};  // dijaga detailLock
+hbui::RtdInfo rtdDetail{};      // dijaga detailLock
+uint32_t lastDetailMs = 0;
+std::atomic<uint8_t> jobRequest{0};  // hbui::ScaleJob
+std::atomic<float> jobRequestGrams{0.0f};
+std::atomic<bool> restoreRequested{false};
+std::atomic<float> restoreCpg{0.0f};
+hbui::ScaleJob activeJob = hbui::ScaleJob::None;  // hanya task ini
+uint32_t activeJobMs = 0;
+hbui::ScaleJob doneJob = hbui::ScaleJob::None;
+hbui::JobResult doneResult = hbui::JobResult::None;
+uint8_t doneSeq = 0;
+constexpr uint32_t kJobTimeoutMs = 15000;  // tidak ada event (mis. ADS1232 diam)
 
 // ---- ringkasan 10 dtk ----
 uint32_t lastSummaryMs = 0;
@@ -139,8 +162,8 @@ void printBanner() {
                   PIN_ENC_B, PIN_ENC_SW, static_cast<unsigned>(app::input::kEncStepsPerDetent));
     Serial.printf("   Video / pintu   : composite GPIO%d (%s) | pintu GPIO%d (LOW = tertutup)\n", PIN_VIDEO,
                   VIDEO_PAL ? "PAL" : "NTSC", PIN_DOOR);
-    Serial.printf("   Buzzer / START  : GPIO%d (pasif, LEDC) | GPIO%d (belum dipakai)\n", PIN_BUZZER, PIN_START_BTN);
-    Serial.printf("   SSR / relay K1  : GPIO%d / GPIO%d (selalu LOW di firmware ini)\n", PIN_HL_CONTROLLER,
+    Serial.printf("   Buzzer / START  : GPIO%d (aktif, LEDC) | GPIO%d (tidak dipasang)\n", PIN_BUZZER, PIN_START_BTN);
+    Serial.printf("   SSR / relay K1  : GPIO%d / GPIO%d (hanya siklus yang menyalakan)\n", PIN_HL_CONTROLLER,
                   PIN_HL_SAFETY);
     Serial.printf(" RTD     : PT%.0f %s, RNOMINAL=%.1f ohm, RREF=%.2f ohm, offset %+.2f C, filter 50 Hz, %" PRIu32 " ms/sampel\n",
                   RTD_RNOMINAL, wireModeText(), RTD_RNOMINAL, RTD_RREF, RTD_OFFSET_C,
@@ -171,6 +194,7 @@ void printHelp() {
     logLine("  p          cetak kalibrasi tersimpan + diagnostik ADS1232");
     logLine("  x          panel diagnostik MAX31865 + fault-detection cycle BARU");
     logLine("  ?          bantuan ini");
+    cycle_service::printHelp();
 }
 
 void printCalibration() {
@@ -515,12 +539,24 @@ void printMinute(const hbcycle::MinuteRecord& minute) {
                   static_cast<unsigned>(minute.secondsValid), minute.valid ? 1 : 0);
 }
 
+bool scaleHealthy() {
+    return loadCell.health() == Ads1232::Health::Ok && !loadCell.drdyTimedOut() && !loadCell.doutError();
+}
+
 void serviceAggregation() {
     // Sampel diambil lebih dulu, lalu detik yang sudah lewat ditutup sampai
     // waktu sampel itu. Urutan ini menjamin sampel masuk ke detiknya sendiri.
     hbcycle::MassSample sample;
     const bool fresh = sensors.takeMassSample(sample);
     const uint32_t nowMs = fresh ? sample.ms : sensors.nowMs();
+
+    // Siklus pengeringan memakai sampel yang sama (lampu ditulis di dalamnya)
+    hbcycle::ChamberReading chamber;
+    chamber.tempOk = rtd.spiOk() && rtd.valid() && rtdPlausible();
+    chamber.tempC = chamber.tempOk ? rtd.tempC() : NAN;
+    chamber.lidClosed = doorClosedNow();
+    cycle_service::step(nowMs, fresh ? &sample : nullptr, chamber, scaleHealthy(), loadCell.offsetCounts(),
+                        loadCell.countsPerGram());
 
     hbcycle::SecondRecord second;
     hbcycle::MinuteRecord minute;
@@ -536,11 +572,137 @@ void serviceAggregation() {
 }
 
 // =====================================================================
+//  Aksi timbangan dari LCD (OPSI PENGEMBANG > TIMBANGAN / KALIBRASI / CEK)
+// =====================================================================
+void finishJob(hbui::JobResult result) {
+    doneJob = activeJob;
+    doneResult = result;
+    ++doneSeq;
+    activeJob = hbui::ScaleJob::None;
+}
+
+void startScaleJob(hbui::ScaleJob job, float grams) {
+    activeJob = job;
+    activeJobMs = millis();
+    if (cycle_service::running() || loadCell.isBusy()) {
+        logLine("Aksi timbangan dari LCD ditolak: %s", cycle_service::running() ? "siklus berjalan" : "ADS1232 sibuk");
+        finishJob(hbui::JobResult::Rejected);
+        return;
+    }
+    switch (job) {
+        case hbui::ScaleJob::Tare:
+            logLine("LCD: tare");
+            loadCell.tare();
+            if (!loadCell.isBusy()) finishJob(hbui::JobResult::Rejected);
+            break;
+        case hbui::ScaleJob::SelfCal:
+            logLine("LCD: self-calibration ADS1232 lalu tare");
+            if (!loadCell.selfCalibrate()) finishJob(hbui::JobResult::Rejected);
+            break;
+        case hbui::ScaleJob::Reset:
+            logLine("LCD: reset ADS1232");
+            loadCell.reset();
+            break;
+        case hbui::ScaleJob::Calibrate:
+            logLine("LCD: kalibrasi 1 titik dengan %.0f g (faktor lama %.3f)", grams, loadCell.countsPerGram());
+            loadCell.calibrateWith(grams);
+            if (!loadCell.isBusy()) finishJob(hbui::JobResult::Rejected);
+            break;
+        case hbui::ScaleJob::None:
+            activeJob = hbui::ScaleJob::None;
+            break;
+    }
+}
+
+// Event driver -> hasil aksi LCD yang sedang berjalan
+void scaleJobEvent(Ads1232::Event event) {
+    using hbui::ScaleJob;
+    switch (event) {
+        case Ads1232::Event::TareDone:
+            if (activeJob == ScaleJob::Tare || activeJob == ScaleJob::SelfCal) finishJob(hbui::JobResult::Done);
+            break;
+        case Ads1232::Event::SelfCalDone:
+            if (activeJob == ScaleJob::SelfCal) {
+                loadCell.tare();  // offset berubah: nolkan ulang
+                if (!loadCell.isBusy()) finishJob(hbui::JobResult::Failed);
+            }
+            break;
+        case Ads1232::Event::SelfCalTimeout:
+            if (activeJob == ScaleJob::SelfCal) finishJob(hbui::JobResult::Failed);
+            break;
+        case Ads1232::Event::ResetDone:
+            if (activeJob == ScaleJob::Reset) finishJob(hbui::JobResult::Done);
+            break;
+        case Ads1232::Event::CalibrationDone:
+            if (activeJob == ScaleJob::Calibrate) finishJob(hbui::JobResult::Done);
+            break;
+        case Ads1232::Event::CalibrationFailed:
+        case Ads1232::Event::JobCanceled:
+        case Ads1232::Event::NvsWriteFailed:
+            if (activeJob != ScaleJob::None && activeJob != ScaleJob::Reset) finishJob(hbui::JobResult::Failed);
+            break;
+        case Ads1232::Event::JobRejected:
+            if (activeJob != ScaleJob::None) finishJob(hbui::JobResult::Rejected);
+            break;
+        default:
+            break;
+    }
+}
+
+void serviceScaleJobs() {
+    if (restoreRequested.exchange(false)) {
+        loadCell.setScale(restoreCpg.load());
+        logLine("LCD: kalibrasi dibatalkan, countsPerGram kembali ke %.3f (NVS)", loadCell.countsPerGram());
+    }
+    const uint8_t request = jobRequest.exchange(0);
+    if (request != 0 && activeJob == hbui::ScaleJob::None) {
+        startScaleJob(static_cast<hbui::ScaleJob>(request), jobRequestGrams.load());
+    }
+    if (activeJob != hbui::ScaleJob::None && (millis() - activeJobMs) > kJobTimeoutMs) {
+        logLine("Aksi timbangan dari LCD: tidak selesai dalam %" PRIu32 " dtk", kJobTimeoutMs / 1000);
+        finishJob(hbui::JobResult::Failed);
+    }
+}
+
+hbui::ScaleStatus scaleStatus() {
+    if (loadCell.drdyTimedOut()) return hbui::ScaleStatus::NoData;
+    if (loadCell.doutError()) return hbui::ScaleStatus::DoutError;
+    if (loadCell.isSettling()) return hbui::ScaleStatus::Settling;
+    if (loadCell.isClipped()) return hbui::ScaleStatus::Clipped;
+    if (loadCell.isBusy()) return hbui::ScaleStatus::Busy;
+    return hbui::ScaleStatus::Ok;
+}
+
+void publishDetail(uint32_t nowMs) {
+    if ((nowMs - lastDetailMs) < 50) return;
+    lastDetailMs = nowMs;
+    hbui::ScaleInfo s{};
+    s.grams = loadCell.grams();
+    s.raw = loadCell.raw();
+    s.status = scaleStatus();
+    s.stable = loadCell.isStable();
+    s.calibrated = loadCell.isCalibrated();
+    s.countsPerGram = loadCell.countsPerGram();
+    s.job = doneJob;
+    s.jobResult = doneResult;
+    s.jobSeq = doneSeq;
+    hbui::RtdInfo r{};
+    r.spiOk = rtd.spiOk();
+    r.ohm = rtd.rtdResistance();
+    r.fault = rtd.fault();
+    portENTER_CRITICAL(&detailLock);
+    scaleDetail = s;
+    rtdDetail = r;
+    portEXIT_CRITICAL(&detailLock);
+}
+
+// =====================================================================
 //  Event dari driver
 // =====================================================================
 void reportLoadCellEvents() {
     for (Ads1232::Event event = loadCell.takeEvent(); event != Ads1232::Event::None;
          event = loadCell.takeEvent()) {
+        scaleJobEvent(event);
         switch (event) {
             case Ads1232::Event::ResetDone:
                 logLine("ADS1232 settling selesai (%u konversi dibuang), DRDY pertama %" PRIu32 " ms",
@@ -887,6 +1049,24 @@ void handleCommand(char* line) {
     const char command = static_cast<char>(tolower(static_cast<unsigned char>(line[0])));
     char* args = skipBlanks(line + 1);
 
+    // Perintah yang mengubah timbangan diblokir selama siklus berjalan:
+    // tare/kalibrasi/reset di tengah tes merusak W0/Wf.
+    // 'd' juga: mengirim log panjang memblok task ini (dan jendela SSR) beberapa detik.
+    if (cycle_service::running() && strchr("tcnmszrd", command) != nullptr) {
+        logLine("Perintah '%c' ditolak: siklus sedang berjalan (batalkan dulu di LCD)", command);
+        return;
+    }
+    if (command == 'y') {
+        cycle_service::command(args);
+        return;
+    }
+    if (command == 'd') {
+        const unsigned long id = strtoul(args, nullptr, 10);
+        if (id == 0 || testLog == nullptr || !testLog->dump(static_cast<uint32_t>(id), Serial)) {
+            logLine("d <id>: log tes tidak ditemukan (lihat daftar dengan l)");
+        }
+        return;
+    }
     if (command == 'c') {
         commandCalibrate(args);
         return;
@@ -934,6 +1114,9 @@ void handleCommand(char* line) {
         case '?':
             printHelp();
             break;
+        case 'l':
+            if (testLog != nullptr) testLog->printList(Serial);
+            break;
         default:
             logLine("Perintah tidak dikenal: '%s' (ketik ? untuk bantuan)", line);
             break;
@@ -971,8 +1154,16 @@ void pollSerialCommands() {
 //  Status untuk UI + ringkasan berkala
 // =====================================================================
 void publishStatus() {
-    scaleOk.store(loadCell.health() == Ads1232::Health::Ok && !loadCell.drdyTimedOut() &&
-                  !loadCell.doutError());
+    if (cycle_service::simulation()) {
+        // Simulasi: UI melihat sensor tiruan (sensor asli boleh tidak terpasang)
+        setCheck(scaleCheck, hbui::CheckState::Ok);
+        setCheck(tempCheck, hbui::CheckState::Ok);
+        scaleOk.store(true);
+        tempOk.store(true);
+        tempC.store(cycle_service::simTempC());
+        return;
+    }
+    scaleOk.store(scaleHealthy());
     const bool valid = rtd.spiOk() && rtd.valid() && rtdPlausible();
     tempOk.store(valid);
     tempC.store(valid ? rtd.tempC() : NAN);
@@ -1040,7 +1231,13 @@ void sensorTask(void*) {
     lastReportMs = millis();
     lastSummaryMs = millis();
 
+    // Watchdog task: task ini yang menulis pin lampu. Kalau macet > 5 dtk
+    // (timeout TWDT bawaan core), ESP32 reset dan R16/R17 menarik K1 + SSR
+    // ke mati. Ditambahkan setelah health check boot (yang boleh lama).
+    esp_task_wdt_add(nullptr);
+
     for (;;) {
+        esp_task_wdt_reset();
         rtd.update();
         loadCell.update();
         serviceAggregation();
@@ -1049,6 +1246,7 @@ void sensorTask(void*) {
 
         serviceAutoTare();
         serviceSettledNotice();
+        serviceScaleJobs();
         reportLoadCellEvents();
         reportRtdFaults();
         reportAdsTimeout();
@@ -1063,13 +1261,17 @@ void sensorTask(void*) {
 
         if (recheckRequested.exchange(false)) {
             logLine("Cek ulang sensor diminta dari layar");
+            esp_task_wdt_reset();
             runHealthCheck();
         }
 
         publishStatus();
+        publishDetail(nowMs);
         serviceReport();
         printSummary(nowMs);
         net->update(nowMs);
+        // OTA hanya saat siklus tidak berjalan (lampu tidak boleh ditinggal)
+        ota_service::update(!cycle_service::running());
 
         // 1 ms: DRDY ADS1232 tetap LOW sampai dibaca (data baru tiap
         // 100 ms), jadi jeda ini tidak membuang sampel.
@@ -1081,9 +1283,10 @@ void sensorTask(void*) {
 
 namespace sensor_service {
 
-void start(InputTask& inputTask, NetClock& netClock, const std::atomic<uint32_t>& renders) {
+void start(InputTask& inputTask, NetClock& netClock, TestLog& log, const std::atomic<uint32_t>& renders) {
     input = &inputTask;
     net = &netClock;
+    testLog = &log;
     renderCount = &renders;
     xTaskCreatePinnedToCore(sensorTask, "sensor", app::task::kSensorStackBytes, nullptr,
                             app::task::kSensorPriority, nullptr, app::task::kSensorCore);
@@ -1103,6 +1306,23 @@ void requestRecheck() {
     scaleCheck.store(hbui::CheckState::Pending);
     tempCheck.store(hbui::CheckState::Pending);
     recheckRequested.store(true);
+}
+
+void detail(hbui::ScaleInfo& scale, hbui::RtdInfo& rtdOut) {
+    portENTER_CRITICAL(&detailLock);
+    scale = scaleDetail;
+    rtdOut = rtdDetail;
+    portEXIT_CRITICAL(&detailLock);
+}
+
+void requestScaleJob(hbui::ScaleJob job, float grams) {
+    jobRequestGrams.store(grams);
+    jobRequest.store(static_cast<uint8_t>(job));
+}
+
+void requestScaleRestore(float countsPerGram) {
+    restoreCpg.store(countsPerGram);
+    restoreRequested.store(true);
 }
 
 }  // namespace sensor_service

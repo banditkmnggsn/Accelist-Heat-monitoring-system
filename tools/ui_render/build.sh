@@ -10,7 +10,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 g++ -std=gnu++17 -O1 -Wall -Wextra -DARDUINO=100 \
     -I "$HERE/shim" -I "$GFX" -I "$ROOT/include" \
     -I "$ROOT/lib/HeatboxUi/src" -I "$ROOT/lib/HeatboxCycle/src" -I "$ROOT/lib/HeatboxInput/src" \
-    "$HERE/ui_render.cpp" "$ROOT"/lib/HeatboxUi/src/*.cpp "$ROOT/lib/HeatboxCycle/src/CycleSettings.cpp" \
+    "$HERE/ui_render.cpp" "$ROOT"/lib/HeatboxUi/src/*.cpp "$ROOT"/lib/HeatboxCycle/src/*.cpp \
     "$GFX/Adafruit_GFX.cpp" -o "$OUT/ui_render" 2> "$OUT/build.log" || { cat "$OUT/build.log"; exit 1; }
 grep -v "Adafruit_GFX.cpp\|glcdfont\|Adafruit-GFX" "$OUT/build.log" | grep -i "warning" || true
 "$OUT/ui_render" "$OUT"

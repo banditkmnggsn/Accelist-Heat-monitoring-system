@@ -7,7 +7,7 @@
 // Rangkaian skematik: BC337 low-side, HIGH = bunyi, diam = LOW (R27
 // pull-down). Duty 0 LEDC = LOW = diam. Kalau suatu saat dipakai modul
 // aktif-LOW, keluaran LEDC harus dibalik dulu; sampai itu dicegah di sini.
-static_assert(BUZZER_PASSIVE, "Firmware ini mengasumsikan buzzer pasif (nada dari LEDC)");
+// Buzzer aktif maupun pasif sama-sama digerakkan LEDC (lihat pins.h).
 static_assert(!BUZZER_ACTIVE_LOW, "Buzzer aktif-LOW belum didukung (LEDC duty 0 akan menyalakannya)");
 
 namespace {

@@ -29,7 +29,7 @@ set "OUT=.pio\msvc"
 if not exist "%OUT%" mkdir "%OUT%"
 set FAILED=0
 
-for %%S in (test_drying_math test_cycle_aggregation test_settings test_input) do (
+for %%S in (test_drying_math test_cycle_aggregation test_settings test_input test_cycle test_advanced) do (
     echo === %%S
     cl /nologo /std:c++14 /W4 /WX /EHsc /D_CRT_SECURE_NO_WARNINGS ^
        /I lib\HeatboxCycle\src /I lib\HeatboxInput\src /I "%UNITY%" ^

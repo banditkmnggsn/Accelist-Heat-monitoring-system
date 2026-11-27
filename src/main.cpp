@@ -6,9 +6,10 @@
 //            loopTask), task input 1 kHz (rotary, pintu, buzzer), dan
 //            loop() = UI (gambar ulang hanya saat ada perubahan, maks ~10 fps)
 //    core 0: WiFi (bawaan ESP-IDF) + task sensor (ADS1232, MAX31865,
-//            perintah serial, ringkasan 10 dtk)
+//            siklus, perintah serial, ringkasan 10 dtk, WiFi/NTP, OTA)
 //  Pemanas (SSR GPIO22, relay K1 GPIO21) dipaksa LOW di baris pertama
-//  setup() dan tidak pernah dinyalakan di firmware ini.
+//  setup(); setelah itu HANYA ditulis oleh siklus (src/CycleService, task
+//  sensor). Build simulasi (env "simulasi") tidak pernah menyalakannya.
 // =====================================================================
 
 #include <Arduino.h>
@@ -17,10 +18,13 @@
 
 #include <atomic>
 
+#include "CycleService.h"
 #include "InputTask.h"
 #include "NetClock.h"
+#include "OtaService.h"
 #include "SensorService.h"
 #include "SettingsStore.h"
+#include "TestLog.h"
 #include "app_config.h"
 #include "pins.h"
 
@@ -34,6 +38,7 @@ ESP_8_BIT_GFX video(VIDEO_PAL == 0, 8);  // true = NTSC, warna 8 bit RGB332, GPI
 InputTask input;
 NetClock net;
 SettingsStore settingsStore;
+TestLog testLog;
 std::atomic<uint32_t> renderCount{0};
 
 // UI -> logika. Layar tidak tahu NVS, buzzer, atau driver.
@@ -44,7 +49,26 @@ public:
         input.buzzer().setEnabled(settings.soundOn);
         return settingsStore.save(settings);
     }
+    bool saveAdvanced(const hbcycle::AdvancedSettings& advanced) override {
+        cycle_service::setAdvanced(advanced);  // berlaku untuk tes berikutnya
+        return settingsStore.saveAdvanced(advanced);
+    }
     void recheckSensors() override { sensor_service::requestRecheck(); }
+    void startTest(const hbcycle::Settings& settings) override { cycle_service::requestStart(settings); }
+    void tareNow() override { cycle_service::requestTare(); }
+    void cancelTest() override { cycle_service::requestCancel(); }
+    void acknowledgeResult() override { cycle_service::requestAcknowledge(); }
+    void acknowledgeInterrupted() override { testLog.clearInterrupted(); }
+    uint8_t historyList(hbcycle::HistoryEntry* out, uint8_t max) override { return testLog.list(out, max); }
+    bool loadResult(uint32_t id, hbcycle::CycleResult& out) override { return testLog.load(id, out); }
+    bool clearLogs() override { return testLog.clearAll(); }
+    void wifiScan() override { net.requestScan(); }
+    uint8_t wifiResults(hbui::WifiNetwork* out, uint8_t max) override { return net.scanResults(out, max); }
+    void wifiConnect(const char* ssid, const char* pass) override { net.requestConnect(ssid, pass); }
+    void wifiReconnect() override { net.requestReconnect(); }
+    void clockSync() override { net.requestSync(); }
+    void scaleJob(hbui::ScaleJob job, float grams) override { sensor_service::requestScaleJob(job, grams); }
+    void scaleRestore(float countsPerGram) override { sensor_service::requestScaleRestore(countsPerGram); }
 };
 
 AppCommands commands;
@@ -65,9 +89,24 @@ void refreshSnapshot(uint32_t nowMs) {
     snapshot.wifi = net.state();
     snapshot.rssi = net.rssi();
     snapshot.clockSynced = net.localTime(snapshot.hour, snapshot.minute);
-    snapshot.testRunning = false;  // siklus dibuat di Prompt 2
+    cycle_service::copyView(snapshot.cycle);
+    const hbcycle::Phase phase = snapshot.cycle.phase;
+    snapshot.testRunning = phase != hbcycle::Phase::Idle && phase != hbcycle::Phase::Done &&
+                           phase != hbcycle::Phase::Failed;
+    snapshot.startPending = cycle_service::startPending();
+    snapshot.hasLast = testLog.last(snapshot.last);
+    snapshot.historyCount = testLog.count();
+    snapshot.historyCapacity = TestLog::kMaxTests;
+    snapshot.interruptedId = testLog.interruptedId();
+    snapshot.simulation = cycle_service::simulation();
+    net.info(snapshot.net);
+    snapshot.net.ota = ota_service::state();
+    snapshot.net.otaPct = ota_service::percent();
+    sensor_service::detail(snapshot.scale, snapshot.rtd);
+    snapshot.device.totalTests = testLog.totalTests();
+    snapshot.device.logFreeKb = testLog.freeKb();
+    snapshot.device.logTotalKb = testLog.totalKb();
     snapshot.holdProgressMs = input.holdProgressMs();
-    snapshot.input = input.diag();
 }
 
 }  // namespace
@@ -91,21 +130,39 @@ void setup() {
     if (settingsRepaired) {
         Serial.println("# Pengaturan (NVS hbcfg) kosong/rusak -> bawaan ditulis ulang");
     }
+    bool advancedRepaired = false;
+    const hbcycle::AdvancedSettings advanced = settingsStore.loadAdvanced(advancedRepaired);
+    if (advancedRepaired) {
+        Serial.println("# Opsi pengembang (NVS hbcfg/adv) kosong/rusak -> bawaan ditulis ulang");
+    }
 
     input.begin(settings.soundOn);  // buzzer: GPIO12 LOW dulu, baru task input jalan
+
+    // Log tes di flash. Boot pertama memformat partisi (beberapa detik).
+    const uint32_t fsStart = millis();
+    if (testLog.begin()) {
+        Serial.printf("# LittleFS: %u tes tersimpan (%lu ms)%s\n", static_cast<unsigned>(testLog.count()),
+                      static_cast<unsigned long>(millis() - fsStart),
+                      testLog.interruptedId() != 0 ? ", ADA TES TERPUTUS" : "");
+    } else {
+        Serial.println("# LittleFS GAGAL di-mount: hasil tes tidak disimpan");
+    }
+    cycle_service::begin(testLog, net, advanced);
 
     const uint32_t heapBefore = ESP.getFreeHeap();
     video.begin();             // ISR video di core ini (core 1)
     video.copyAfterSwap = false;  // tiap render menggambar layar penuh
     net.begin();
+    net.deviceIds(snapshot.device.mac, snapshot.device.id);  // tetap selama alat nyala
+    ota_service::begin(net);
     Serial.printf("# Video %s 256x240: framebuffer %u B. Heap bebas setelah video + WiFi: %u B (blok terbesar %u B)\n",
                   VIDEO_PAL ? "PAL" : "NTSC", static_cast<unsigned>(heapBefore - ESP.getFreeHeap()),
                   static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
 
-    sensor_service::start(input, net, renderCount);
+    sensor_service::start(input, net, testLog, renderCount);
 
     refreshSnapshot(millis());
-    ui.begin(settings, snapshot);
+    ui.begin(settings, advanced, snapshot);
     input.buzzer().play(hbui::Sound::Welcome, false);
 }
 
@@ -126,7 +183,7 @@ void loop() {
 
     if (ui.needsRender() && (nowMs - lastRenderMs) >= app::ui::kMinRenderIntervalMs) {
         lastRenderMs = nowMs;
-        hbui::Painter painter(video, ui.style());
+        hbui::Painter painter(video);
         ui.render(painter, snapshot);
         video.waitForFrame();  // tukar buffer saat vsync (tidur, bukan busy-wait)
         renderCount.fetch_add(1);

@@ -37,7 +37,7 @@ public:
     // Panggil tiap polling. Return +1, -1, atau 0.
     int8_t update(uint8_t ab);
 
-    // ---- diagnostik (UJI INPUT) ----
+    // ---- diagnostik ----
     int32_t rawCount() const { return raw_; }           // transisi sah bertanda
     uint32_t invalidJumps() const { return invalid_; }  // dua bit berubah sekaligus
     // Gerak yang kembali ke detent tanpa menjadi satu klik (pantulan,

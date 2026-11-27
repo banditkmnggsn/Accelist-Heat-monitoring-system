@@ -3,7 +3,11 @@
 // =====================================================================
 //  sounds.h — SEMUA suara buzzer di satu tabel, supaya mudah di-tweak
 //
-//  Buzzer BZ1 pasif (magnetik) lewat BC337; nada dari PWM LEDC.
+//  Buzzer BZ1 AKTIF lewat BC337, digerakkan PWM LEDC (26 Nov 2026).
+//  Di buzzer aktif glide (sapuan nada) terdengar jelek; yang terdengar
+//  baik adalah nada datar 1300-2400 Hz yang dipotong on/off. Karena itu
+//  BOOT, KONFIRMASI, dan ERROR dibuat ulang sebagai bip putus-putus.
+//  PERINGATAN, SELESAI, TAHAN SELESAI, dan KLIK tetap (sudah disukai).
 //  Satu langkah = {f0, f1, ms, gateOn, gateOff}:
 //    f0 = 0          : diam selama ms
 //    f0 == f1        : nada datar
@@ -36,17 +40,13 @@ struct SoundDef {
 
 namespace sounds {
 
-// BOOT: motor/rotor berputar naik (sapuan pelan), getaran rotor yang
-// makin cepat, lalu tiga nada penutup naik "siap".
+// BOOT: "bip-bip-biiip" naik, nada datar (buzzer aktif)
 constexpr ToneStep kWelcome[] = {
-    {180, 900, 420, 0, 0},
-    {900, 1500, 220, 14, 6},
-    {0, 0, 70, 0, 0},
-    {1047, 1047, 80, 0, 0},
-    {0, 0, 25, 0, 0},
-    {1568, 1568, 80, 0, 0},
-    {0, 0, 25, 0, 0},
-    {2093, 2794, 200, 0, 0},
+    {1300, 1300, 80, 0, 0},
+    {0, 0, 60, 0, 0},
+    {1750, 1750, 80, 0, 0},
+    {0, 0, 60, 0, 0},
+    {2400, 2400, 260, 0, 0},
 };
 
 // KLIK (TEKAN): kicauan sangat pendek naik
@@ -61,18 +61,22 @@ constexpr ToneStep kHoldDone[] = {
     {2400, 2400, 75, 0, 0},
 };
 
-// KONFIRMASI (tersimpan): nada pendek lalu luncuran naik
+// KONFIRMASI (tersimpan): tiga ketukan cepat "tit-tit-tit", nada sama
 constexpr ToneStep kConfirm[] = {
-    {1568, 1568, 55, 0, 0},
-    {0, 0, 20, 0, 0},
-    {2093, 2700, 120, 0, 0},
+    {2100, 2100, 40, 0, 0},
+    {0, 0, 35, 0, 0},
+    {2100, 2100, 40, 0, 0},
+    {0, 0, 35, 0, 0},
+    {2100, 2100, 60, 0, 0},
 };
 
-// ERROR (ditolak/gagal): sapuan turun lalu dengung rendah terputus
+// ERROR (ditolak/gagal): tiga bip panjang rendah putus-putus
 constexpr ToneStep kError[] = {
-    {1100, 320, 360, 0, 0},
-    {0, 0, 40, 0, 0},
-    {320, 320, 160, 22, 18},
+    {1300, 1300, 170, 0, 0},
+    {0, 0, 110, 0, 0},
+    {1300, 1300, 170, 0, 0},
+    {0, 0, 110, 0, 0},
+    {1300, 1300, 260, 0, 0},
 };
 
 // PERINGATAN: nada panjang dua-ton bergantian (~1 dtk)

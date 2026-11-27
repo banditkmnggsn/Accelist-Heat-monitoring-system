@@ -41,8 +41,10 @@ Default). Alat berdiri sendiri; tidak ada lagi dasbor PC. Rinciannya ada di [RAN
 | Driver load cell, suhu | ✅ jalan, load cell sudah terkarakterisasi |
 | Sensor suhu PT100 | ✅ pengawatan 3-wire benar, RREF dari multimeter + offset −1,5 °C ([spesifikasi §8.1](SPESIFIKASI-TEKNIS.md)) |
 | Matematika siklus + nilai per menit di firmware (`lib/HeatboxCycle`) | ✅ teruji, cocok dengan versi Python |
-| LCD + rotary (Prompt 1): boot, beranda, pilih profil, pengaturan, servis uji tampilan/input/suara; WiFi + jam NTP; buzzer | 🧪 ter-build, menunggu uji di LCD fisik |
-| Siklus di firmware, pemanas, log flash, layar tes/hasil/riwayat, servis lengkap, OTA | ⏳ Prompt 2 |
+| LCD + rotary (Prompt 1): boot, beranda, pilih profil, pengaturan; WiFi + jam NTP; buzzer | ✅ diuji di LCD fisik 6 Nov 2026 |
+| Prompt 2: siklus di firmware (PRE-HEAT .. HASIL), kontrol lampu PI + K1/SSR, log LittleFS + riwayat, layar tes/hasil/error/riwayat, env `simulasi` | 🧪 ter-build + 58 uji PC + simulasi; menunggu uji di alat (lampu) |
+| Pengaturan lengkap (27 Nov 2026): SET PROFIL, WIFI & JAM (ganti SSID/sandi di LCD), INFO PERANGKAT, OPSI PENGEMBANG (status sensor, timbangan, kalibrasi, cek, parameter metode, kontrol pemanas, tampilan, memori log), OTA. Menu SERVIS lama dihapus | 🧪 ter-build + 64 uji PC + pratinjau; menunggu uji di alat |
+| Aplikasi HP (Flutter) | ⏳ belum dimulai |
 | Dasbor PC | 📦 diarsipkan (`archive/tuning_web`) |
 
 ## Mulai
@@ -50,12 +52,18 @@ Default). Alat berdiri sendiri; tidak ada lagi dasbor PC. Rinciannya ada di [RAN
 ```bash
 pio run                        # build (platform dikunci espressif32@6.5.0 / core 2.0.14)
 pio run -t upload              # flash ke ESP32 (COM5; tutup Serial Monitor dulu)
+pio run -e simulasi -t upload  # sama, tetapi sensor & lampu DITIRU (lampu asli tidak menyala)
 pio device monitor             # serial 115200, ketik ? untuk daftar perintah
 pio test -e native             # unit test di PC (butuh gcc)
 ```
 
-- **WiFi:** salin `include/secrets.example.h` menjadi `include/secrets.h` lalu isi SSID dan
-  sandi. Tanpa file itu build tetap jalan, WiFi dilewati.
+- **WiFi:** bisa diatur langsung di LCD (PENGATURAN > WIFI & JAM > GANTI WIFI; tersimpan di
+  NVS setelah berhasil tersambung). `include/secrets.h` (salinan `secrets.example.h`) hanya
+  cadangan kalau NVS kosong, dan tempat `OTA_PASS`.
+- **OTA (update lewat WiFi):** isi `OTA_PASS` di `include/secrets.h`, upload sekali lewat USB.
+  Setelah itu `pio run -e ota -t upload --upload-port <NAMA OTA>.local` dengan variabel
+  lingkungan `HEATBOX_OTA_PASS` = sandi itu. Nama/IP ada di PENGATURAN > INFO PERANGKAT.
+  OTA ditolak selama tes berjalan.
 - **Build flag** di `platformio.ini`: `VIDEO_PAL=0/1` (NTSC/PAL), `ENABLE_WIFI=1/0`.
 - Serial: report lama 500 ms **mati** bawaan (`v` untuk menyalakan); tiap 10 detik muncul baris
   `# RINGKASAN` (noise berat, suhu, heap, fps, WiFi).
@@ -65,7 +73,7 @@ pio test -e native             # unit test di PC (butuh gcc)
 ## Kontrol
 
 Hanya rotary: **PUTAR** pilih/ubah, **TEKAN** OK, **TAHAN 2 dtk** kembali (di Pilih Profil:
-mulai), **TAHAN 5 dtk di Beranda** = menu servis. Lengkapnya di
+mulai). Menu tim IT: PENGATURAN > OPSI PENGEMBANG, lalu **TAHAN 5 dtk**. Lengkapnya di
 [docs/ui/KONTROL-ROTARY.md](docs/ui/KONTROL-ROTARY.md).
 
 ## Struktur
@@ -80,9 +88,12 @@ lib/HeatboxUi/      tampilan LCD: tema, ikon, widget, layar, manajer layar
 src/main.cpp        perekat: video, UI loop (core 1)
 src/SensorService   task sensor + perintah serial + ringkasan (core 0)
 src/InputTask       polling rotary/pintu 1 kHz + buzzer (core 1)
-src/Buzzer, sounds.h  buzzer pasif LEDC + tabel suara
-src/NetClock        WiFi STA + NTP WIB
-src/SettingsStore   pengaturan di NVS "hbcfg"
+src/Buzzer, sounds.h  buzzer (aktif, digerakkan LEDC) + tabel suara
+src/NetClock        WiFi STA + NTP WIB + pindai/ganti WiFi dari LCD
+src/OtaService      update firmware lewat WiFi (ArduinoOTA)
+src/CycleService    siklus + pin lampu (task sensor), env simulasi
+src/TestLog         log tes di LittleFS + riwayat
+src/SettingsStore   pengaturan operator + opsi pengembang di NVS "hbcfg"
 test/               uji unit (PC)
 tools/ui_render/    alat dev: render PNG semua layar di PC
 docs/ui/            desain, keputusan UI, kontrol rotary, pratinjau layar

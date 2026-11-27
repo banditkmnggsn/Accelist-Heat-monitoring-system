@@ -1,7 +1,8 @@
 #pragma once
 
 // =====================================================================
-//  Buzzer.h — sequencer nada non-blocking untuk buzzer pasif (GPIO12)
+//  Buzzer.h — sequencer nada non-blocking untuk buzzer GPIO12
+//  (BZ1 aktif; PWM LEDC tetap dipakai untuk mewarnai nadanya)
 //
 //  - Nada dari LEDC (timer PWM sendiri, clock APB). Tidak memakai I2S,
 //    DAC, maupun APLL milik library video, jadi tidak bentrok.
@@ -24,7 +25,7 @@ public:
     void begin(bool enabled);
     void setEnabled(bool enabled) { enabled_.store(enabled); }
 
-    // Thread-safe. force = bunyi walau suara dimatikan (UJI SUARA).
+    // Thread-safe. force = bunyi walau suara dimatikan (konfirmasi tombol SUARA).
     void play(hbui::Sound sound, bool force);
 
     // Dipanggil tiap ~1 ms dari task input.

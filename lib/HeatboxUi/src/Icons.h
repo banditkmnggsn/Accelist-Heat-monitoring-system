@@ -7,7 +7,7 @@
 //          IKON PIXEL). Di desain kotaknya 16x16 tetapi gambarnya hanya
 //          8 baris teratas.
 //  Kecil : 8 x 8, digambar ulang (desain hanya memperkecil versi besar
-//          di browser, tidak ada bitmap 8x8 asli). Dinilai di UJI TAMPILAN.
+//          di browser, tidak ada bitmap 8x8 asli). Dinilai di uji LCD 6 Nov 2026.
 // =====================================================================
 
 #include <cstdint>
@@ -42,6 +42,5 @@ constexpr int16_t kIconSmallH = 8;
 // Baris dari atas; bit paling kiri = MSB.
 const uint16_t* iconLarge(Icon icon);  // 8 baris x 16 bit
 const uint8_t* iconSmall(Icon icon);   // 8 baris x 8 bit
-const char* iconName(Icon icon);
 
 }  // namespace hbui

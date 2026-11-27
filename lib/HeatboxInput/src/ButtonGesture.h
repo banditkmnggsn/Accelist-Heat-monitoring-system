@@ -8,7 +8,7 @@
 //    - TAHAN : masih ditahan saat holdTargetMs tercapai. Aksi terjadi
 //              TEPAT di batas itu, lalu tombol harus dilepas dulu sebelum
 //              event apa pun berikutnya. Target ditentukan layar aktif
-//              (2 dtk kembali/mulai, 5 dtk servis, 0 = tidak ada aksi).
+//              (2 dtk kembali/mulai, 5 dtk opsi pengembang, 0 = tidak ada aksi).
 //    - Putar sambil menekan = batal: tidak ada TEKAN maupun TAHAN sampai
 //      tombol dilepas (putarannya sendiri diabaikan oleh pemanggil).
 //    - Tombol yang sudah ditekan saat start tidak menghasilkan event.

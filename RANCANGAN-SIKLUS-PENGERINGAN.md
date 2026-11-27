@@ -1,9 +1,10 @@
 # Rancangan Siklus Pengeringan — Heat Box
 
-**Versi:** 5 Oktober 2026
-**Status:** rancangan disetujui. Selesai: matematika kurva + nilai per menit di firmware
-(teruji), fondasi LCD + rotary + pengaturan (Prompt 1, 5 Nov 2026, menunggu uji LCD fisik).
-Siklus di firmware, pemanas, logger, dan layar tes/hasil belum dibuat (§13).
+**Versi:** 5 Oktober 2026 (status diperbarui 26 November 2026)
+**Status:** rancangan disetujui. Selesai: matematika kurva + nilai per menit, fondasi LCD
+(Prompt 1, diuji di LCD 6 Nov), dan Prompt 2 (26 Nov 2026): siklus di firmware, kontrol lampu,
+log flash, layar tes/hasil/riwayat, simulasi. Prompt 2 teruji di PC + simulasi, **belum diuji
+dengan lampu asli** (§13).
 
 Ini satu-satunya dokumen panjang di proyek: alur operator, pengaturan dan nilai bawaan,
 pengolahan data, penanganan drift, status hasil, log, tampilan LCD, dan rencana uji.
@@ -149,8 +150,10 @@ sampai puluhan mg saat jumper disentuh (SPESIFIKASI §8.2). Pedoman untuk bagian
 
 ### 4.2 Parameter metode — tetap di firmware, bukan menu operator
 
-Parameter ini menentukan *cara mengukur*, jadi tidak ditaruh di menu operator. Nilainya
-hanya diubah lewat serial atau mode servis **[USUL]**.
+Parameter ini menentukan *cara mengukur*, jadi tidak ditaruh di menu operator. Enam di
+antaranya (ambang Fase A, konfirmasi, target laju, tambahan stop, tare stabil, darurat suhu)
+bisa diubah tim IT di LCD: PENGATURAN > OPSI PENGEMBANG > PARAMETER METODE (NVS `hbcfg`/`adv`,
+berlaku untuk tes berikutnya). Sisanya hanya lewat kode **[KUNCI, 27 Nov 2026]**.
 
 | Parameter | Nilai | Status |
 |---|---|---|
@@ -479,9 +482,9 @@ dari tampilan, yang diganti hanya `LcdView`.
 | SSR lampu (HLController) | 22 | BC337 low-side, pull-down R16 di board Power |
 | Relay pengaman K1 (HLSafety) | 21 | BC337 low-side, pull-down R17 |
 | Saklar pintu | 34 | input-only, pull-up R8 10k eksternal, LOW = tertutup |
-| Tombol Start 22 mm | 35 | input-only; pull-up R4 10k + RC; belum dipakai |
+| Tombol Start 22 mm | 35 | input-only; pull-up R4 10k + RC; **tidak dipasang** (rotary saja, 26 Nov 2026) |
 | Composite video | 25 | DAC1 |
-| Buzzer pasif | 12 | BC337 low-side, R27 pull-down (strapping wajib LOW) |
+| Buzzer (terpasang: aktif) | 12 | BC337 low-side, R27 pull-down (strapping wajib LOW); tetap digerakkan PWM LEDC |
 | DS18B20 suhu load cell (opsional) | 5 | 1-Wire, pull-up R12 4k7 |
 | **Hindari** | 14 | mengeluarkan PWM saat boot → lampu berkedip |
 
@@ -551,14 +554,15 @@ LCD"). Jenis LCD belum final.
 
 **Navigasi [KUNCI, Nov 2026]:** hanya rotary (tombol Start belum dipakai). PUTAR = pilih /
 halaman / ubah nilai, TEKAN = OK / simpan, TAHAN 2 dtk = kembali (di Pilih Profil = mulai tes),
-TAHAN 5 dtk di Beranda = servis, batal tes berjalan = TAHAN 3 dtk. Lengkap:
+batal tes berjalan = TAHAN 3 dtk; menu tim IT = PENGATURAN > OPSI PENGEMBANG + TAHAN 5 dtk
+(menu SERVIS lama dihapus 27 Nov 2026). Lengkap:
 `docs/ui/KONTROL-ROTARY.md`.
 
 **Desain [KUNCI]:** `docs/ui/LCD_UI_Design.html` + `.pdf` (layar 256×240, palet RGB332, font
 5×7 T1–T4, zona PARKING x 156–255 y 0–42 selalu putih). Penyimpangan dicatat di
 `docs/ui/KEPUTUSAN-UI.md`. Status Prompt 1: boot, beranda, riwayat (kosong), pilih profil,
-pengaturan, error SENSOR, servis (UJI TAMPILAN/INPUT/SUARA) sudah dibuat; layar tes dan hasil
-di bawah ini = Prompt 2.
+pengaturan, error SENSOR sudah dibuat; layar tes dan hasil di bawah ini = Prompt 2; pengaturan
+lengkap + opsi pengembang + WiFi + OTA = 27 Nov 2026 (`KEPUTUSAN-UI.md` §10).
 
 **Screen hasil:**
 
@@ -636,13 +640,14 @@ Mode report biasa sudah cukup: kolom `raw` adalah sampel mentah tiap 0,5 detik.
 | 0 | Analisis log 10 g → finalkan σ dan ambang | menunggu log |
 | 1 | `lib/HeatboxCycle/src/DryingMath.*`: nilai per menit, Theil–Sen, fit eksponensial, prediksi stop, cross-check A1 | **selesai** — 10 uji cocok dengan `drying.py` (≤ 1e-6), uji mutasi menangkap salah port, terkompilasi untuk ESP32 tanpa warning (`test/README.md`) |
 | 2 | `SensorInput`, `HardwareSensors` (sampel lolos-gerbang dari `Ads1232::accepted()`), `SecondAggregator`, `MinuteBuilder`; baris `MNT` tiap menit sejak boot | **selesai** — 13 uji lolos (`test\run_msvc.bat`), firmware ter-build untuk ESP32 tanpa warning baru (RAM 7,3 %). Ikut diperbaiki: filter angka W yang lambat setelah beban berubah (SPESIFIKASI §4.2) |
-| 3 | `HeatBoxDummyData`: mode simulasi penuh (berat + suhu + pemanas) dan mode hybrid (load cell asli, suhu dan pemanas disimulasikan) untuk uji penguapan di suhu ruang sebelum pemanas dan sensor suhu siap **[USUL]** | belum |
-| 4 | `CycleController` + `HeatBoxDataSource` + baris `CYC`; dasbor menjadi panel operator sementara (Start / Tare / Batal, fase, status, estimasi stop) | belum |
-| 5 | Logger LittleFS + ambil log | belum |
-| 6 | Pemanas: SSR, kontrol PI, interlock, saklar tutup | belum |
+| 3 | `SimModel` (HeatBoxDummyData): simulasi penuh berat + suhu + lampu; env `simulasi` (waktu ×10, lampu asli tidak pernah menyala, pintu dari limit switch asli). Mode hybrid belum | **selesai** (26 Nov) |
+| 4 | `CycleController` (fase, Fase A/B, fit + V1–V7, status/kode/bendera) + `CycleView` untuk LCD + baris `CYC` serial + perintah `y` | **selesai** — `test_cycle` 9 skenario lolos (siklus OK: tau 3,98 vs 4,0 simulasi) |
+| 5 | Logger LittleFS (`src/TestLog`): `.res` hasil + `.sec` per detik, 40 tes, tes terputus → E-RESET; serial `l` / `d <id>` | **selesai**, belum diuji di board |
+| 6 | Lampu: PI + jendela SSR 2 dtk (`HeaterControl`), urutan K1 → SSR, interlock pintu, suhu darurat (setpoint + 15 °C / 165 °C), sensor putus 3 dtk | **selesai di kode + simulasi**; tuning PI di alat asli (U3) belum |
 | 7 | Blank run + koreksi drift | belum |
 | 8a | LCD fondasi (Prompt 1): video + rotary + buzzer + WiFi/NTP, boot, beranda, pilih profil, menu pengaturan, servis uji | **selesai, menunggu uji LCD fisik** — ter-build untuk ESP32 tanpa warning (recipe Arduino-ESP32 2.0.14; `pio run` pertama di PC), 49 uji PC lolos, pratinjau `docs/ui/pratinjau/` |
-| 8b | LCD: screen live tes, screen hasil, riwayat, servis lengkap, OTA (Prompt 2) | belum |
+| 8b | LCD: layar tes berjalan, hasil 7 halaman, error, riwayat (Prompt 2) | **selesai**, pratinjau `docs/ui/pratinjau/39-78` |
+| 8c | LCD: pengaturan lengkap (SET PROFIL, WIFI & JAM + ketik SSID/sandi, INFO), opsi pengembang (sensor, timbangan, kalibrasi 1 titik, cek, parameter metode, kontrol pemanas, tampilan, memori log), OTA | **selesai di kode** (27 Nov 2026), 64 uji PC, pratinjau `18-38`, `79-100`; menunggu uji di alat |
 | 9 | Uji hardware U2–U9, tuning, pembaruan dokumen | belum |
 
 ~~Setelah langkah 4, siklus penuh dijalankan beberapa kali dari dasbor~~ — diganti (Nov 2026):

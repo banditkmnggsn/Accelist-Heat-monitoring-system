@@ -12,7 +12,7 @@
 namespace app {
 
 constexpr const char* kFirmwareName    = "Heat Box - LCD composite + rotary";
-constexpr const char* kFirmwareVersion = "0.2.0";
+constexpr const char* kFirmwareVersion = "0.4.0";
 
 constexpr uint32_t kSerialBaud = 115200;  // harus sama dengan monitor_speed
 // TX buffer UART (harus > 128 = FIFO hardware). Tanpa buffer, output
@@ -93,7 +93,6 @@ constexpr uint32_t kPollPeriodMs = 1;  // task input 1 kHz di core 1
 
 // Decoder: transisi quadrature per klik (detent). EC11 20 klik/20 pulsa
 // = 4. Kalau 1 klik baru menghasilkan langkah tiap 2 klik, ganti ke 2.
-// UJI INPUT menampilkan hitungan raw per klik untuk mengeceknya.
 constexpr uint8_t kEncStepsPerDetent = 4;
 // true kalau putar kanan ternyata mengurangi nilai (A/B tertukar)
 constexpr bool kEncReverse = false;
@@ -104,18 +103,21 @@ constexpr uint32_t kDoorDebounceMs   = 30;
 constexpr uint32_t kPressMaxMs      = 600;   // lepas sebelum ini = TEKAN
 constexpr uint32_t kHoldBarMs       = 600;   // bar progres muncul (= batas TEKAN)
 constexpr uint32_t kHoldActionMs    = 2000;  // TAHAN: kembali / mulai / batal edit
-constexpr uint32_t kHoldServiceMs   = 5000;  // TAHAN di Beranda: masuk SERVIS
-constexpr uint32_t kHoldCancelTestMs = 3000; // batal tes berjalan (dipakai Prompt 2)
+constexpr uint32_t kHoldDevMs       = 5000;  // TAHAN: masuk OPSI PENGEMBANG (tim IT)
+constexpr uint32_t kHoldCancelTestMs = 3000; // batal tes berjalan
+constexpr uint32_t kHoldCharMs      = 1000;  // ketik SSID/sandi: kunci karakter
 
 // Percepatan saat mengubah nilai: klik yang datang < jendela ini setelah
 // klik sebelumnya dianggap putaran cepat -> langkah kAccelStep.
 constexpr uint32_t kAccelWindowMs = 45;
 constexpr int     kAccelStep     = 5;
 
-// Anomali untuk UJI INPUT: klik berlawanan arah dalam jendela ini
-// setelah klik sebelumnya dicurigai langkah mundur palsu.
-constexpr uint32_t kReverseSuspectMs = 120;
 }  // namespace input
+
+// Parameter siklus & kontrol PI lampu: bawaan di lib/HeatboxCycle
+// (CycleConfig, PiParams), bisa diubah dan disimpan dari LCD:
+// PENGATURAN > OPSI PENGEMBANG > PARAMETER METODE / KONTROL PEMANAS.
+// PI WAJIB disetel di alat asli (uji U3: ruang kosong, lihat baris CYC).
 
 // =====================================================================
 //  UI & video
@@ -126,6 +128,12 @@ constexpr uint32_t kSnapshotPeriodMs    = 50;
 constexpr float kHotBannerOnC  = 50.0f;  // banner "ruang masih panas"
 constexpr float kHotBannerOffC = 48.0f;  // histeresis supaya tidak berkedip
 constexpr uint32_t kBootNetBudgetMs = 8000;  // boot maks menunggu WiFi + jam
+// CEK TIMBANGAN: selisih diterima = 5 mg + 0,01 % acuan (10 g -> 6 mg,
+// 100 g -> 15 mg). Usulan awal; sesuaikan dengan kelas anak timbangan.
+constexpr float kCheckTolBaseMg = 5.0f;
+constexpr float kCheckTolFraction = 0.0001f;
+// Tare / kalibrasi ADS1232 = 64 sampel @10 SPS (~6,4 dtk), untuk bar progres
+constexpr uint32_t kScaleJobMs = 6400;
 }  // namespace ui
 
 // =====================================================================
@@ -138,7 +146,9 @@ constexpr uint32_t kBootNetBudgetMs = 8000;  // boot maks menunggu WiFi + jam
 namespace task {
 constexpr int kSensorCore = 0;
 constexpr unsigned kSensorPriority = 4;
-constexpr uint32_t kSensorStackBytes = 8192;
+// 16 KB: siklus menjalankan fit eksponensial di task ini (rantai terdalam
+// ~6,4 KB terukur dengan -fstack-usage, 26 Nov 2026) + printf/LittleFS.
+constexpr uint32_t kSensorStackBytes = 16384;
 constexpr int kInputCore = 1;
 constexpr unsigned kInputPriority = 3;  // di atas loop() (prioritas 1)
 constexpr uint32_t kInputStackBytes = 4096;
